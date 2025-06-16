@@ -3,6 +3,8 @@
 const express = require('express');
 const config = require('./src/cross/entity/config');
 const { initialize, getInstance } = require('./src/data/manager/keys_vo_manager');
+const DatabaseInitializer = require('./src/data/initializer/database_initializer');
+const securityRoutes = require('./src/api/security/routes');
 
 // Load configuration
 config.load();
@@ -22,6 +24,9 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString()
     });
 });
+
+// Security API routes
+app.use('/:aiName/security', securityRoutes);
 
 // Example endpoint to get AI configuration
 app.get('/config/ai/:aiName', async (req, res) => {
@@ -81,6 +86,54 @@ app.get('/config/agent/:agentName', async (req, res) => {
     }
 });
 
+// Database initialization status endpoint
+app.get('/admin/database/status', async (req, res) => {
+    try {
+        const manager = getInstance();
+        const keysVO = await manager.getKeysVO();
+        const aiNames = keysVO.getAINames();
+
+        const dbInitializer = new DatabaseInitializer();
+        const results = {};
+
+        for (const aiName of aiNames) {
+            results[aiName] = await dbInitializer.verifyInitialization(aiName);
+        }
+
+        res.json({
+            error: false,
+            data: results
+        });
+
+    } catch (error) {
+        console.error('Error getting database status:', error);
+        res.status(500).json({
+            error: true,
+            message: 'Failed to get database status'
+        });
+    }
+});
+
+// Force database initialization endpoint
+app.post('/admin/database/initialize', async (req, res) => {
+    try {
+        const dbInitializer = new DatabaseInitializer();
+        await dbInitializer.initializeAll();
+
+        res.json({
+            error: false,
+            message: 'Database initialization completed successfully'
+        });
+
+    } catch (error) {
+        console.error('Error initializing databases:', error);
+        res.status(500).json({
+            error: true,
+            message: 'Failed to initialize databases'
+        });
+    }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Unhandled error:', err);
@@ -93,7 +146,7 @@ app.use((err, req, res, next) => {
 // Initialize and start server
 async function start() {
     try {
-        console.log('Initializing NeuronCore...');
+        console.log('🚀 Initializing NeuronCore...');
 
         // Get config token from configuration
         const configToken = config.get('neuronDB.configToken');
@@ -103,7 +156,7 @@ async function start() {
 
         // Initialize KeysVO manager
         await initialize(configToken);
-        console.log('KeysVO manager initialized successfully');
+        console.log('✅ KeysVO manager initialized successfully');
 
         // Verify initialization by loading data
         const manager = getInstance();
@@ -111,31 +164,23 @@ async function start() {
         const aiNames = keysVO.getAINames();
         const agentNames = keysVO.getAgentNames();
 
-        console.log(`Loaded ${aiNames.length} AI configurations`);
-        console.log(`Loaded ${agentNames.length} agent configurations`);
+        console.log(`📊 Loaded ${aiNames.length} AI configurations`);
+        console.log(`🔌 Loaded ${agentNames.length} agent configurations`);
+
+        // Initialize databases
+        const dbInitializer = new DatabaseInitializer();
+        await dbInitializer.initializeAll();
 
         // Start server
         app.listen(PORT, () => {
-            console.log(`NeuronCore server running on port ${PORT}`);
-            console.log(`Health check: http://localhost:${PORT}/health`);
+            console.log(`\n🌟 NeuronCore server running on port ${PORT}`);
+            console.log(`📋 Health check: http://localhost:${PORT}/health`);
+            console.log(`🔐 Security API: http://localhost:${PORT}/{ai_name}/security/*`);
+            console.log(`🛠️  Database status: http://localhost:${PORT}/admin/database/status`);
         });
 
     } catch (error) {
-        console.error('Failed to start NeuronCore:', error);
+        console.error('❌ Failed to start NeuronCore:', error);
         process.exit(1);
     }
 }
-
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-    console.log('\nShutting down gracefully...');
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    console.log('\nShutting down gracefully...');
-    process.exit(0);
-});
-
-// Start the application
-start();

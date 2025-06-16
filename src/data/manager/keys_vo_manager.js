@@ -214,7 +214,7 @@ module.exports = {
      * @returns {Promise<void>}
      */
     async initialize(configToken) {
-        const instance = this.getInstance();
+        const instance = module.exports.getInstance(); // FIX: usar module.exports
         await instance.initialize(configToken);
     }
 };

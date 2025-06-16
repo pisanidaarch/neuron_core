@@ -1,7 +1,7 @@
 {
   "name": "neuron-core",
   "version": "1.0.0",
-  "description": "NeuronCore - Multi-AI orchestration platform with workflow capabilities",
+  "description": "NeuronCore - Multi-AI orchestration platform with workflow capabilities and security module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -9,18 +9,31 @@
     "test": "jest",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
+    "test:security": "jest tests/security",
     "test:coverage": "jest --coverage",
+    "test:watch": "jest --watch",
     "lint": "eslint src/**/*.js",
-    "lint:fix": "eslint src/**/*.js --fix"
+    "lint:fix": "eslint src/**/*.js --fix",
+    "docs": "jsdoc src/**/*.js -d docs",
+    "db:init": "node -e \"require('./src/data/initializer/database_initializer').initializeAll()\"",
+    "db:status": "node -e \"console.log('Use: curl http://localhost:3000/admin/database/status')\"",
+    "security:test": "newman run postman/NeuronCore-Security.postman_collection.json"
   },
   "keywords": [
     "ai",
     "orchestration",
     "workflow",
     "neurondb",
-    "multi-tenant"
+    "multi-tenant",
+    "security",
+    "authentication",
+    "authorization",
+    "subscription",
+    "users",
+    "groups",
+    "permissions"
   ],
-  "author": "",
+  "author": "NeuronCore Team",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.6.7",
@@ -31,17 +44,22 @@
     "jest": "^29.7.0",
     "nodemon": "^3.0.3",
     "eslint": "^8.56.0",
-    "@types/jest": "^29.5.11"
+    "@types/jest": "^29.5.11",
+    "newman": "^6.0.0",
+    "supertest": "^6.3.4"
   },
   "jest": {
     "testEnvironment": "node",
     "coverageDirectory": "coverage",
     "collectCoverageFrom": [
       "src/**/*.js",
-      "!src/**/*.test.js"
+      "!src/**/*.test.js",
+      "!src/**/node_modules/**"
     ],
     "testMatch": [
-      "**/tests/**/*.test.js"
+      "**/tests/**/*.test.js",
+      "**/__tests__/**/*.js",
+      "**/?(*.)+(spec|test).js"
     ],
     "coverageThreshold": {
       "global": {
@@ -50,9 +68,19 @@
         "lines": 70,
         "statements": 70
       }
-    }
+    },
+    "setupFilesAfterEnv": ["<rootDir>/tests/setup.js"],
+    "testTimeout": 30000
   },
   "engines": {
     "node": ">=16.0.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/neuron-core.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/neuron-core/issues"
+  },
+  "homepage": "https://github.com/your-org/neuron-core#readme"
 }

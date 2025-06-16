@@ -30,6 +30,7 @@ describe('CommandService', () => {
         };
     });
 
+
     describe('createCommand', () => {
         test('should create a frontend command successfully', async () => {
             const commandData = {

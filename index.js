@@ -4,14 +4,15 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
-// Import core components
-const KeysVO = require('./src/cross/entity/keys_vo');
+// Import initializer
 const DatabaseInitializer = require('./src/data/initializer/database_initializer');
-const ConfigSender = require('./src/data/neuron_db/config_sender');
 
 // Import route modules
 const securityRoutes = require('./src/api/security/routes');
 const supportRoutes = require('./src/api/support/routes');
+
+// Import error handler
+const { ErrorHandler } = require('./src/cross/entity/errors');
 
 /**
  * NeuronCore main application
@@ -28,7 +29,7 @@ class NeuronCore {
      */
     async initialize() {
         try {
-            console.log('Initializing NeuronCore...');
+            console.log('🚀 Initializing NeuronCore...');
 
             // Initialize KeysVO first
             await this._initializeKeysVO();
@@ -60,8 +61,8 @@ class NeuronCore {
             console.log('   🔑 Initializing KeysVO...');
 
             // Use KeysVOManager to properly initialize from config file
-            const KeysVOManager = require('./src/data/manager/keys_vo_manager');
-            const keysVOManager = new KeysVOManager();
+            const { getInstance } = require('./src/data/manager/keys_vo_manager');
+            const keysVOManager = getInstance();
 
             const keysVO = await keysVOManager.initialize();
 
@@ -84,148 +85,96 @@ class NeuronCore {
      * @private
      */
     _setupMiddleware() {
-        console.log('   ⚙️  Setting up middleware...');
+        console.log('   🔧 Setting up middleware...');
 
-        // Enable CORS
+        // CORS
         this.app.use(cors({
-            origin: process.env.CORS_ORIGIN || '*',
-            credentials: true
+            origin: true,
+            credentials: true,
+            methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+            allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
         }));
 
-        // Parse JSON bodies
+        // Body parsing
         this.app.use(express.json({ limit: '10mb' }));
-
-        // Parse URL-encoded bodies
         this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-        // Request logging middleware
+        // Request logging
         this.app.use((req, res, next) => {
-            console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+            console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
             next();
-        });
-
-        // Error handling middleware
-        this.app.use((error, req, res, next) => {
-            console.error('Express error:', error);
-            res.status(500).json({
-                error: 'Internal server error',
-                message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
-            });
         });
 
         console.log('   ✅ Middleware configured');
     }
 
     /**
-     * Setup application routes
+     * Setup routes
      * @private
      */
     _setupRoutes() {
-        console.log('   🛣️  Setting up routes...');
+        console.log('   🛣 Setting up routes...');
 
-        // Health check endpoint
+        // Health check
         this.app.get('/health', (req, res) => {
             res.json({
                 status: 'ok',
-                initialized: this.initialized,
                 timestamp: new Date().toISOString(),
-                version: process.env.npm_package_version || '1.0.0'
+                initialized: this.initialized,
+                version: '1.0.0'
             });
         });
 
-        // Admin endpoints
-        this._setupAdminRoutes();
+        // API routes
+        this.app.use('/api/security', securityRoutes);
+        this.app.use('/api/support', supportRoutes);
 
-        // Security module routes
-        this.app.use('/', securityRoutes);
-
-        // Support module routes
-        this.app.use('/', supportRoutes);
+        // Root endpoint
+        this.app.get('/', (req, res) => {
+            res.json({
+                name: 'NeuronCore',
+                version: '1.0.0',
+                description: 'Multi-AI orchestration platform with workflow capabilities',
+                status: this.initialized ? 'ready' : 'initializing',
+                endpoints: {
+                    health: '/health',
+                    security: '/api/security',
+                    support: '/api/support'
+                }
+            });
+        });
 
         // 404 handler
         this.app.use('*', (req, res) => {
             res.status(404).json({
-                error: 'Endpoint not found',
-                path: req.originalUrl,
-                method: req.method
+                error: true,
+                message: 'Endpoint not found',
+                requestedPath: req.originalUrl
             });
         });
+
+        // Error handler
+        this.app.use(ErrorHandler.handleError);
 
         console.log('   ✅ Routes configured');
     }
 
     /**
-     * Setup admin routes
-     * @private
-     */
-    _setupAdminRoutes() {
-        // Database status endpoint
-        this.app.get('/admin/database/status', async (req, res) => {
-            try {
-                const keysVO = await KeysVO.getInstance();
-                const configSender = new ConfigSender(keysVO);
-                const initializer = new DatabaseInitializer();
-                initializer.initialize(configSender);
-
-                const status = await initializer.getInitializationStatus(keysVO.getConfigToken());
-
-                res.json({
-                    success: true,
-                    status,
-                    timestamp: new Date().toISOString()
-                });
-            } catch (error) {
-                console.error('Error getting database status:', error);
-                res.status(500).json({
-                    error: 'Failed to get database status',
-                    message: error.message
-                });
-            }
-        });
-
-        // Force database initialization endpoint
-        this.app.post('/admin/database/initialize', async (req, res) => {
-            try {
-                console.log('🔄 Manual database initialization requested...');
-                await this._initializeDatabases();
-
-                res.json({
-                    success: true,
-                    message: 'Database initialization completed',
-                    timestamp: new Date().toISOString()
-                });
-            } catch (error) {
-                console.error('Error initializing databases:', error);
-                res.status(500).json({
-                    error: 'Failed to initialize databases',
-                    message: error.message
-                });
-            }
-        });
-    }
-
-    /**
-     * Initialize databases and structures
+     * Initialize databases
      * @private
      */
     async _initializeDatabases() {
         try {
-            console.log('   🗃️  Initializing databases...');
-
-            const keysVO = await KeysVO.getInstance();
-            const configSender = new ConfigSender(keysVO);
+            console.log('   💾 Initializing databases...');
 
             const initializer = new DatabaseInitializer();
-            initializer.initialize(configSender);
+            await initializer.initializeAll();
 
-            await initializer.runInitialization(keysVO.getConfigToken());
-
-            console.log('   ✅ Databases initialized successfully');
-
+            console.log('   ✅ Databases initialized');
         } catch (error) {
             console.error('   ❌ Failed to initialize databases:', error);
-            // Don't throw here - allow the server to start even if database init fails
-            console.warn('   ⚠️  Server will continue starting, but some features may not work');
+            // Don't throw error, just warn - databases might already exist
+            console.warn('   ⚠ Continuing without database initialization...');
         }
     }
 
@@ -238,68 +187,54 @@ class NeuronCore {
                 await this.initialize();
             }
 
-            this.app.listen(this.port, () => {
-                console.log(`🚀 NeuronCore server running on port ${this.port}`);
-                console.log(`📝 Health check: http://localhost:${this.port}/health`);
-                console.log(`🔐 Security API: http://localhost:${this.port}/{ai_name}/security/*`);
-                console.log(`🛠️  Support API: http://localhost:${this.port}/{ai_name}/support/*`);
-                console.log(`⚙️  Admin API: http://localhost:${this.port}/admin/*`);
+            this.server = this.app.listen(this.port, () => {
+                console.log(`🌟 NeuronCore server running on port ${this.port}`);
+                console.log(`📊 Health check: http://localhost:${this.port}/health`);
+                console.log(`🔐 Security API: http://localhost:${this.port}/api/security`);
+                console.log(`🔧 Support API: http://localhost:${this.port}/api/support`);
             });
 
+            // Handle graceful shutdown
+            process.on('SIGTERM', () => this.shutdown());
+            process.on('SIGINT', () => this.shutdown());
+
         } catch (error) {
-            console.error('Failed to start NeuronCore:', error);
+            console.error('❌ Failed to start NeuronCore:', error);
             process.exit(1);
         }
     }
 
     /**
-     * Graceful shutdown
+     * Shutdown the server gracefully
      */
     async shutdown() {
-        console.log('🛑 Shutting down NeuronCore...');
+        console.log('\n🛑 Shutting down NeuronCore...');
 
-        // Add any cleanup logic here
+        if (this.server) {
+            this.server.close(() => {
+                console.log('✅ Server closed');
+                process.exit(0);
+            });
 
-        console.log('✅ NeuronCore shutdown complete');
-        process.exit(0);
+            // Force close after 10 seconds
+            setTimeout(() => {
+                console.log('⚠ Forcing server shutdown...');
+                process.exit(1);
+            }, 10000);
+        } else {
+            process.exit(0);
+        }
     }
 }
-
-// Handle graceful shutdown
-process.on('SIGTERM', async () => {
-    console.log('SIGTERM received');
-    if (neuronCore) {
-        await neuronCore.shutdown();
-    }
-});
-
-process.on('SIGINT', async () => {
-    console.log('SIGINT received');
-    if (neuronCore) {
-        await neuronCore.shutdown();
-    }
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-    console.error('Uncaught Exception:', error);
-    process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    process.exit(1);
-});
 
 // Create and start the application
 const neuronCore = new NeuronCore();
 
-// Start the server if this file is run directly
-if (require.main === module) {
-    neuronCore.start().catch(error => {
-        console.error('Failed to start NeuronCore:', error);
-        process.exit(1);
-    });
-}
+// Start server
+neuronCore.start().catch(error => {
+    console.error('Failed to start NeuronCore:', error);
+    process.exit(1);
+});
 
-module.exports = NeuronCore;
+// Export for testing
+module.exports = neuronCore;

@@ -1,46 +1,55 @@
-
 // src/data/snl/plan_snl.js
 
 /**
- * PlanSNL - SNL commands for Plan entity
+ * PlanSNL - SNL commands for Plan entity operations
  */
 class PlanSNL {
     constructor() {
-        // SNL commands are defined as methods
+        this.namespace = 'main.core';
+        this.entityName = 'plans';
     }
 
     /**
-     * Get plans list SNL
+     * Check if plans structure exists
      * @returns {string}
      */
-    getListPlansSNL() {
-        return 'list(structure)\nvalues("*")\non(main.core.plans)';
+    checkPlansStructureExistsSNL() {
+        return `list(structure)\nvalues("${this.entityName}")\non(${this.namespace})`;
     }
 
     /**
-     * Get specific plan SNL
-     * @param {string} planId - Plan ID
+     * Create plans structure if not exists
      * @returns {string}
      */
-    getPlanSNL(planId) {
-        if (!planId) {
-            throw new Error('Plan ID is required');
-        }
-        return `one(structure, id)\nvalues("${planId}")\non(main.core.plans)`;
+    createPlansStructureSNL() {
+        return `set(structure)\nvalues("${this.entityName}", {})\non(${this.namespace}.${this.entityName})`;
     }
 
     /**
-     * Create/Update plan SNL
+     * Set plan SNL
      * @param {string} planId - Plan ID
      * @param {Object} planData - Plan data
      * @returns {string}
      */
     setPlanSNL(planId, planData) {
-        if (!planId || !planData) {
-            throw new Error('Plan ID and data are required');
-        }
-        const planDataJson = JSON.stringify(planData);
-        return `set(structure)\nvalues("${planId}", ${planDataJson})\non(main.core.plans)`;
+        return `set(structure)\nvalues("${planId}", ${JSON.stringify(planData)})\non(${this.namespace}.${this.entityName})`;
+    }
+
+    /**
+     * Get plan SNL
+     * @param {string} planId - Plan ID
+     * @returns {string}
+     */
+    getPlanSNL(planId) {
+        return `view(structure)\nvalues("${planId}")\non(${this.namespace}.${this.entityName})`;
+    }
+
+    /**
+     * List plans SNL
+     * @returns {string}
+     */
+    listPlansSNL() {
+        return `list(structure)\nvalues("*")\non(${this.namespace}.${this.entityName})`;
     }
 
     /**
@@ -49,10 +58,7 @@ class PlanSNL {
      * @returns {string}
      */
     removePlanSNL(planId) {
-        if (!planId) {
-            throw new Error('Plan ID is required');
-        }
-        return `remove(structure)\nvalues("${planId}")\non(main.core.plans)`;
+        return `remove(structure)\nvalues("${planId}")\non(${this.namespace}.${this.entityName})`;
     }
 
     /**
@@ -61,238 +67,276 @@ class PlanSNL {
      * @returns {string}
      */
     searchPlansSNL(searchTerm) {
-        if (!searchTerm) {
-            throw new Error('Search term is required');
-        }
-        return `search(structure)\nvalues("${searchTerm}")\non(main.core.plans)`;
+        return `search(structure)\nvalues("${searchTerm}")\non(${this.namespace}.${this.entityName})`;
     }
 
     /**
-     * Get all plans with their data
-     * @returns {string}
-     */
-    getAllPlansSNL() {
-        return 'view(structure)\non(main.core.plans)';
-    }
-
-    /**
-     * Get active plans only
+     * Get active plans SNL
      * @returns {string}
      */
     getActivePlansSNL() {
-        return 'search(structure)\nvalues("active", true)\non(main.core.plans)';
+        return `search(structure)\nvalues("isActive":true)\non(${this.namespace}.${this.entityName})`;
     }
 
     /**
-     * Get plans by billing cycle
-     * @param {string} billingCycle - Billing cycle (monthly, yearly)
+     * Get visible plans SNL
      * @returns {string}
      */
-    getPlansByBillingCycleSNL(billingCycle) {
-        if (!billingCycle) {
-            throw new Error('Billing cycle is required');
-        }
-        return `search(structure)\nvalues("${billingCycle}")\non(main.core.plans)`;
+    getVisiblePlansSNL() {
+        return `search(structure)\nvalues("isVisible":true)\non(${this.namespace}.${this.entityName})`;
     }
 
     /**
-     * Parse plans list response
-     * @param {Array|Object} response - Response from NeuronDB
-     * @returns {Array} Array of plan IDs
+     * Get plans by price range SNL
+     * @param {number} minPrice - Minimum price
+     * @param {number} maxPrice - Maximum price
+     * @param {string} cycle - Billing cycle (monthly|yearly)
+     * @returns {string}
      */
-    parsePlansListResponse(response) {
-        if (!response) return [];
-
-        if (Array.isArray(response)) {
-            return response;
-        }
-
-        if (typeof response === 'object') {
-            return Object.keys(response);
-        }
-
-        return [];
+    getPlansByPriceRangeSNL(minPrice, maxPrice, cycle = 'monthly') {
+        const priceField = cycle === 'yearly' ? 'price.yearly' : 'price.monthly';
+        return `search(structure)\nvalues("${priceField}":{"$gte":${minPrice},"$lte":${maxPrice}})\non(${this.namespace}.${this.entityName})`;
     }
 
     /**
-     * Parse single plan response
-     * @param {Object} response - Response from NeuronDB
-     * @returns {Object|null} Plan data
-     */
-    parsePlanResponse(response) {
-        if (!response || typeof response !== 'object') {
-            return null;
-        }
-
-        return {
-            name: response.name,
-            description: response.description,
-            price: response.price,
-            currency: response.currency || 'BRL',
-            billing_cycle: response.billing_cycle || 'monthly',
-            limits: response.limits || {
-                max_users: 1,
-                max_tokens: 100000,
-                max_commands: 1000,
-                max_workflows: 100
-            },
-            features: response.features || [],
-            active: response.active !== undefined ? response.active : true,
-            created_at: response.created_at,
-            updated_at: response.updated_at
-        };
-    }
-
-    /**
-     * Parse all plans response
-     * @param {Object} response - Response from NeuronDB
-     * @returns {Object} Object with plan ID as key and plan data as value
-     */
-    parseAllPlansResponse(response) {
-        if (!response || typeof response !== 'object') {
-            return {};
-        }
-
-        return response;
-    }
-
-    /**
-     * Parse search results
-     * @param {Object} response - Response from NeuronDB
-     * @returns {Array} Array of matched plans
-     */
-    parseSearchResponse(response) {
-        if (!response || typeof response !== 'object') {
-            return [];
-        }
-
-        const results = [];
-        for (const [planId, planData] of Object.entries(response)) {
-            results.push({
-                id: planId,
-                ...planData
-            });
-        }
-
-        return results;
-    }
-
-    /**
-     * Build plan data for NeuronDB
-     * @param {Object} plan - Plan entity
-     * @returns {Object} Plan data formatted for NeuronDB
+     * Build plan data for storage
+     * @param {Plan} plan - Plan entity
+     * @returns {Object}
      */
     buildPlanData(plan) {
         return {
+            id: plan.id,
             name: plan.name,
             description: plan.description,
             price: plan.price,
             currency: plan.currency,
-            billing_cycle: plan.billing_cycle,
-            limits: plan.limits,
             features: plan.features,
-            active: plan.active,
-            created_at: plan.created_at,
-            updated_at: plan.updated_at
+            limits: plan.limits,
+            isActive: plan.isActive,
+            isVisible: plan.isVisible,
+            sortOrder: plan.sortOrder,
+            metadata: plan.metadata,
+            trialDays: plan.trialDays,
+            setupFee: plan.setupFee,
+            aiName: plan.aiName,
+            createdAt: plan.createdAt,
+            updatedAt: plan.updatedAt
         };
-    }
-
-    /**
-     * Create initial plans structure if it doesn't exist
-     * @returns {string}
-     */
-    createPlansStructureSNL() {
-        return 'set(structure)\nvalues("plans", {})\non(main.core.plans)';
-    }
-
-    /**
-     * Check if plans structure exists
-     * @returns {string}
-     */
-    checkPlansStructureExistsSNL() {
-        return 'list(structure)\nvalues("plans")\non(main.core)';
     }
 
     /**
      * Parse structure exists response
-     * @param {Array|Object} response - Response from NeuronDB
-     * @returns {boolean} True if structure exists
+     * @param {Object} response - SNL response
+     * @returns {boolean}
      */
     parseStructureExistsResponse(response) {
-        if (Array.isArray(response)) {
-            return response.includes('plans');
+        if (!response || typeof response !== 'object') {
+            return false;
         }
 
-        if (typeof response === 'object') {
-            return Object.keys(response).includes('plans');
-        }
-
-        return false;
+        // If plans entity exists, response should contain it
+        return Object.prototype.hasOwnProperty.call(response, this.entityName);
     }
 
     /**
-     * Get plan pricing information
-     * @returns {string}
+     * Parse plans list response
+     * @param {Object} response - SNL response
+     * @returns {Array<string>}
      */
-    getPlanPricingSNL() {
-        return 'view(structure)\non(main.core.plans)';
-    }
-
-    /**
-     * Parse plan pricing response
-     * @param {Object} response - Response from NeuronDB
-     * @returns {Array} Array of plan pricing information
-     */
-    parsePlanPricing(response) {
+    parsePlansList(response) {
         if (!response || typeof response !== 'object') {
             return [];
         }
 
-        const pricing = [];
-        for (const [planId, planData] of Object.entries(response)) {
-            if (planData.active) {
-                pricing.push({
-                    id: planId,
-                    name: planData.name,
-                    price: planData.price,
-                    currency: planData.currency || 'BRL',
-                    billing_cycle: planData.billing_cycle || 'monthly',
-                    features: planData.features || []
-                });
-            }
-        }
-
-        return pricing.sort((a, b) => a.price - b.price);
+        // Extract plan IDs from response, excluding the entity name itself
+        return Object.keys(response).filter(key => key !== this.entityName);
     }
 
     /**
-     * Get plan limits information
-     * @param {string} planId - Plan ID
-     * @returns {string}
+     * Parse plan data response
+     * @param {Object} response - SNL response
+     * @returns {Object}
      */
-    getPlanLimitsSNL(planId) {
-        if (!planId) {
-            throw new Error('Plan ID is required');
-        }
-        return `one(structure, id)\nvalues("${planId}")\non(main.core.plans)`;
-    }
-
-    /**
-     * Parse plan limits response
-     * @param {Object} response - Response from NeuronDB
-     * @returns {Object|null} Plan limits
-     */
-    parsePlanLimits(response) {
+    parsePlanData(response) {
         if (!response || typeof response !== 'object') {
             return null;
         }
 
-        return response.limits || {
-            max_users: 1,
-            max_tokens: 100000,
-            max_commands: 1000,
-            max_workflows: 100
+        // Return the first non-entity object found
+        for (const [key, value] of Object.entries(response)) {
+            if (key !== this.entityName && typeof value === 'object' && value !== null) {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Validate plan ID
+     * @param {string} planId - Plan ID to validate
+     * @throws {Error} If plan ID is invalid
+     */
+    validatePlanId(planId) {
+        if (!planId || typeof planId !== 'string') {
+            throw new Error('Plan ID must be a non-empty string');
+        }
+
+        if (planId.length > 50) {
+            throw new Error('Plan ID must be 50 characters or less');
+        }
+
+        // Check for valid characters (alphanumeric, underscore, hyphen)
+        const validIdPattern = /^[a-zA-Z0-9_-]+$/;
+        if (!validIdPattern.test(planId)) {
+            throw new Error('Plan ID can only contain letters, numbers, underscores, and hyphens');
+        }
+    }
+
+    /**
+     * Build plan search filters
+     * @param {Object} filters - Search filters
+     * @returns {string} Search pattern
+     */
+    buildSearchFilters(filters) {
+        const searchTerms = [];
+
+        if (filters.isActive !== undefined) {
+            searchTerms.push(`"isActive":${filters.isActive}`);
+        }
+
+        if (filters.isVisible !== undefined) {
+            searchTerms.push(`"isVisible":${filters.isVisible}`);
+        }
+
+        if (filters.currency) {
+            searchTerms.push(`"currency":"${filters.currency}"`);
+        }
+
+        if (filters.hasTrialDays) {
+            searchTerms.push(`"trialDays":{"$gt":0}`);
+        }
+
+        if (filters.minPrice !== undefined && filters.maxPrice !== undefined) {
+            const cycle = filters.cycle || 'monthly';
+            const priceField = cycle === 'yearly' ? 'price.yearly' : 'price.monthly';
+            searchTerms.push(`"${priceField}":{"$gte":${filters.minPrice},"$lte":${filters.maxPrice}}`);
+        }
+
+        if (filters.hasFeature) {
+            searchTerms.push(`"features":"${filters.hasFeature}"`);
+        }
+
+        return searchTerms.length > 0 ? searchTerms.join(' AND ') : '*';
+    }
+
+    /**
+     * Parse plan statistics from response
+     * @param {Object} response - SNL response containing multiple plans
+     * @returns {Object} Statistics object
+     */
+    parsePlanStatistics(response) {
+        if (!response || typeof response !== 'object') {
+            return {
+                total: 0,
+                active: 0,
+                visible: 0,
+                byPriceRange: {},
+                averagePrice: { monthly: 0, yearly: 0 }
+            };
+        }
+
+        const stats = {
+            total: 0,
+            active: 0,
+            visible: 0,
+            byPriceRange: {
+                free: 0,
+                basic: 0,       // 0-50
+                standard: 0,    // 50-150
+                premium: 0,     // 150-500
+                enterprise: 0   // 500+
+            },
+            averagePrice: { monthly: 0, yearly: 0 },
+            totalRevenue: { monthly: 0, yearly: 0 }
         };
+
+        let totalMonthlyPrice = 0;
+        let totalYearlyPrice = 0;
+
+        for (const [key, value] of Object.entries(response)) {
+            if (key !== this.entityName && typeof value === 'object' && value !== null) {
+                stats.total++;
+
+                if (value.isActive) stats.active++;
+                if (value.isVisible) stats.visible++;
+
+                // Price range categorization
+                const monthlyPrice = value.price?.monthly || 0;
+                if (monthlyPrice === 0) {
+                    stats.byPriceRange.free++;
+                } else if (monthlyPrice <= 50) {
+                    stats.byPriceRange.basic++;
+                } else if (monthlyPrice <= 150) {
+                    stats.byPriceRange.standard++;
+                } else if (monthlyPrice <= 500) {
+                    stats.byPriceRange.premium++;
+                } else {
+                    stats.byPriceRange.enterprise++;
+                }
+
+                // Calculate totals for averages
+                totalMonthlyPrice += monthlyPrice;
+                totalYearlyPrice += (value.price?.yearly || 0);
+
+                // Revenue calculation (for active and visible plans)
+                if (value.isActive && value.isVisible) {
+                    stats.totalRevenue.monthly += monthlyPrice;
+                    stats.totalRevenue.yearly += (value.price?.yearly || 0);
+                }
+            }
+        }
+
+        // Calculate averages
+        if (stats.total > 0) {
+            stats.averagePrice.monthly = Math.round((totalMonthlyPrice / stats.total) * 100) / 100;
+            stats.averagePrice.yearly = Math.round((totalYearlyPrice / stats.total) * 100) / 100;
+        }
+
+        return stats;
+    }
+
+    /**
+     * Build plan feature comparison SNL
+     * @param {Array<string>} planIds - Plan IDs to compare
+     * @returns {string}
+     */
+    buildFeatureComparisonSNL(planIds) {
+        const planFilter = planIds.map(id => `"${id}"`).join(',');
+        return `view(structure)\nvalues(${planFilter})\non(${this.namespace}.${this.entityName})`;
+    }
+
+    /**
+     * Get plans sorted by price SNL
+     * @param {string} cycle - Billing cycle (monthly|yearly)
+     * @param {string} order - Sort order (asc|desc)
+     * @returns {string}
+     */
+    getPlansSortedByPriceSNL(cycle = 'monthly', order = 'asc') {
+        // Note: This would require enhanced SNL sorting capabilities
+        // For now, we return all plans and sort in JavaScript
+        return this.listPlansSNL();
+    }
+
+    /**
+     * Get recommended plans SNL
+     * @param {string} userType - User type (individual|team|enterprise)
+     * @returns {string}
+     */
+    getRecommendedPlansSNL(userType) {
+        // This would filter plans based on user type recommendations
+        // For now, we return all active and visible plans
+        return `search(structure)\nvalues("isActive":true,"isVisible":true)\non(${this.namespace}.${this.entityName})`;
     }
 }
 

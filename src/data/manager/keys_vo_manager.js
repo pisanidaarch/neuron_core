@@ -24,6 +24,12 @@ class KeysVOManager {
             // Read config file
             const configData = await this.loadConfig();
 
+            // Validate config first
+            const validationErrors = this.validateConfig(configData);
+            if (validationErrors.length > 0) {
+                throw new Error(`Configuration validation failed: ${validationErrors.join(', ')}`);
+            }
+
             // Create or get KeysVO instance
             this.keysVO = await KeysVO.getInstance();
 
@@ -154,4 +160,20 @@ class KeysVOManager {
     }
 }
 
+// Singleton instance for global access
+let instance = null;
+
+/**
+ * Get singleton instance of KeysVOManager
+ * @returns {KeysVOManager}
+ */
+function getInstance() {
+    if (!instance) {
+        instance = new KeysVOManager();
+    }
+    return instance;
+}
+
+// Export the class and the getInstance function
 module.exports = KeysVOManager;
+module.exports.getInstance = getInstance;

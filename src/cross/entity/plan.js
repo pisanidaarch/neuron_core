@@ -1,99 +1,72 @@
 // src/cross/entity/plan.js
 
 /**
- * Plan entity for NeuronCore security module
+ * Plan Entity - Represents a subscription plan
  */
 class Plan {
     constructor(data = {}) {
         this.id = data.id || '';
         this.name = data.name || '';
         this.description = data.description || '';
-        this.price = data.price || 0;
+        this.price = data.price || { monthly: 0, yearly: 0 };
         this.currency = data.currency || 'BRL';
-        this.billing_cycle = data.billing_cycle || 'monthly'; // monthly, yearly
-        this.limits = data.limits || {
-            max_users: 1,
-            max_tokens: 100000,
-            max_commands: 1000,
-            max_workflows: 100
-        };
         this.features = data.features || [];
-        this.active = data.active !== undefined ? data.active : true;
-        this.created_at = data.created_at || new Date().toISOString();
-        this.updated_at = data.updated_at || new Date().toISOString();
+        this.limits = data.limits || {};
+        this.isActive = data.isActive !== undefined ? data.isActive : true;
+        this.isVisible = data.isVisible !== undefined ? data.isVisible : true;
+        this.sortOrder = data.sortOrder || 0;
+        this.metadata = data.metadata || {};
+        this.trialDays = data.trialDays || 0;
+        this.setupFee = data.setupFee || 0;
+        this.aiName = data.aiName || '';
+        this.createdAt = data.createdAt || new Date().toISOString();
+        this.updatedAt = data.updatedAt || new Date().toISOString();
     }
 
     /**
-     * Create plan from NeuronDB response
-     * @param {string} planId - Plan ID (key)
-     * @param {Object} data - Plan data from NeuronDB
-     * @returns {Plan}
-     */
-    static fromNeuronDB(planId, data) {
-        return new Plan({
-            id: planId,
-            name: data.name,
-            description: data.description,
-            price: data.price,
-            currency: data.currency || 'BRL',
-            billing_cycle: data.billing_cycle || 'monthly',
-            limits: data.limits || {
-                max_users: 1,
-                max_tokens: 100000,
-                max_commands: 1000,
-                max_workflows: 100
-            },
-            features: data.features || [],
-            active: data.active !== undefined ? data.active : true,
-            created_at: data.created_at,
-            updated_at: data.updated_at
-        });
-    }
-
-    /**
-     * Convert to NeuronDB format
-     * @returns {Object}
-     */
-    toNeuronDB() {
-        return {
-            name: this.name,
-            description: this.description,
-            price: this.price,
-            currency: this.currency,
-            billing_cycle: this.billing_cycle,
-            limits: this.limits,
-            features: this.features,
-            active: this.active,
-            created_at: this.created_at,
-            updated_at: this.updated_at
-        };
-    }
-
-    /**
-     * Validate plan data
-     * @returns {Object} { valid: boolean, errors: string[] }
+     * Validate the plan entity
+     * @returns {Object} Validation result
      */
     validate() {
         const errors = [];
 
-        if (!this.id || this.id.length < 2) {
-            errors.push('Plan ID must be at least 2 characters');
+        if (!this.id || this.id.trim().length === 0) {
+            errors.push('Plan ID is required');
         }
 
-        if (!this.name || this.name.length < 2) {
-            errors.push('Plan name must be at least 2 characters');
+        if (!this.name || this.name.trim().length === 0) {
+            errors.push('Plan name is required');
         }
 
-        if (this.price < 0) {
-            errors.push('Price cannot be negative');
+        if (this.name && this.name.length > 100) {
+            errors.push('Plan name must be 100 characters or less');
         }
 
-        if (!['monthly', 'yearly'].includes(this.billing_cycle)) {
-            errors.push('Billing cycle must be monthly or yearly');
+        if (!this.price || typeof this.price !== 'object') {
+            errors.push('Plan price is required and must be an object');
+        } else {
+            if (typeof this.price.monthly !== 'number' || this.price.monthly < 0) {
+                errors.push('Monthly price must be a non-negative number');
+            }
+            if (typeof this.price.yearly !== 'number' || this.price.yearly < 0) {
+                errors.push('Yearly price must be a non-negative number');
+            }
         }
 
-        if (!this.limits.max_users || this.limits.max_users < 1) {
-            errors.push('Max users must be at least 1');
+        if (!Array.isArray(this.features)) {
+            errors.push('Features must be an array');
+        }
+
+        if (!this.limits || typeof this.limits !== 'object') {
+            errors.push('Limits must be an object');
+        }
+
+        if (this.trialDays && (typeof this.trialDays !== 'number' || this.trialDays < 0)) {
+            errors.push('Trial days must be a non-negative number');
+        }
+
+        if (this.setupFee && (typeof this.setupFee !== 'number' || this.setupFee < 0)) {
+            errors.push('Setup fee must be a non-negative number');
         }
 
         return {
@@ -103,114 +76,70 @@ class Plan {
     }
 
     /**
-     * Check if plan allows specific user count
-     * @param {number} userCount - Number of users
-     * @returns {boolean}
+     * Convert to plain object for storage
+     * @returns {Object}
      */
-    allowsUserCount(userCount) {
-        return userCount <= this.limits.max_users;
+    toObject() {
+        return {
+            id: this.id,
+            name: this.name,
+            description: this.description,
+            price: this.price,
+            currency: this.currency,
+            features: this.features,
+            limits: this.limits,
+            isActive: this.isActive,
+            isVisible: this.isVisible,
+            sortOrder: this.sortOrder,
+            metadata: this.metadata,
+            trialDays: this.trialDays,
+            setupFee: this.setupFee,
+            aiName: this.aiName,
+            createdAt: this.createdAt,
+            updatedAt: this.updatedAt
+        };
     }
 
     /**
-     * Check if plan allows specific token usage
-     * @param {number} tokens - Number of tokens
-     * @returns {boolean}
+     * Create from plain object
+     * @param {Object} data - Data object
+     * @returns {Plan}
      */
-    allowsTokens(tokens) {
-        return tokens <= this.limits.max_tokens;
+    static fromObject(data) {
+        return new Plan(data);
     }
 
     /**
-     * Check if plan allows specific command count
-     * @param {number} commands - Number of commands
-     * @returns {boolean}
+     * Calculate yearly savings percentage
+     * @returns {number} Savings percentage
      */
-    allowsCommands(commands) {
-        return commands <= this.limits.max_commands;
+    getYearlySavings() {
+        if (!this.price.monthly || !this.price.yearly) return 0;
+
+        const yearlyEquivalent = this.price.monthly * 12;
+        if (yearlyEquivalent === 0) return 0;
+
+        return Math.round(((yearlyEquivalent - this.price.yearly) / yearlyEquivalent) * 100);
     }
 
     /**
-     * Check if plan allows specific workflow count
-     * @param {number} workflows - Number of workflows
-     * @returns {boolean}
+     * Get formatted price for display
+     * @param {string} cycle - Billing cycle (monthly|yearly)
+     * @param {string} locale - Locale for formatting
+     * @returns {string} Formatted price
      */
-    allowsWorkflows(workflows) {
-        return workflows <= this.limits.max_workflows;
+    getFormattedPrice(cycle = 'monthly', locale = 'pt-BR') {
+        const price = cycle === 'yearly' ? this.price.yearly : this.price.monthly;
+
+        return new Intl.NumberFormat(locale, {
+            style: 'currency',
+            currency: this.currency
+        }).format(price);
     }
 
     /**
-     * Get monthly price (convert yearly to monthly if needed)
-     * @returns {number}
-     */
-    getMonthlyPrice() {
-        if (this.billing_cycle === 'monthly') {
-            return this.price;
-        }
-        return this.price / 12;
-    }
-
-    /**
-     * Get yearly price (convert monthly to yearly if needed)
-     * @returns {number}
-     */
-    getYearlyPrice() {
-        if (this.billing_cycle === 'yearly') {
-            return this.price;
-        }
-        return this.price * 12;
-    }
-
-    /**
-     * Deactivate plan
-     */
-    deactivate() {
-        this.active = false;
-        this.updated_at = new Date().toISOString();
-    }
-
-    /**
-     * Activate plan
-     */
-    activate() {
-        this.active = true;
-        this.updated_at = new Date().toISOString();
-    }
-
-    /**
-     * Update limits
-     * @param {Object} newLimits - New limits object
-     */
-    updateLimits(newLimits) {
-        this.limits = { ...this.limits, ...newLimits };
-        this.updated_at = new Date().toISOString();
-    }
-
-    /**
-     * Add feature
-     * @param {string} feature - Feature name
-     */
-    addFeature(feature) {
-        if (!this.features.includes(feature)) {
-            this.features.push(feature);
-            this.updated_at = new Date().toISOString();
-        }
-    }
-
-    /**
-     * Remove feature
-     * @param {string} feature - Feature name
-     */
-    removeFeature(feature) {
-        const index = this.features.indexOf(feature);
-        if (index > -1) {
-            this.features.splice(index, 1);
-            this.updated_at = new Date().toISOString();
-        }
-    }
-
-    /**
-     * Check if plan has feature
-     * @param {string} feature - Feature name
+     * Check if plan has specific feature
+     * @param {string} feature - Feature to check
      * @returns {boolean}
      */
     hasFeature(feature) {
@@ -218,57 +147,222 @@ class Plan {
     }
 
     /**
-     * Create default plans
-     * @returns {Plan[]}
+     * Add feature to plan
+     * @param {string} feature - Feature to add
      */
-    static createDefaultPlans() {
+    addFeature(feature) {
+        if (!this.hasFeature(feature)) {
+            this.features.push(feature);
+            this.updatedAt = new Date().toISOString();
+        }
+    }
+
+    /**
+     * Remove feature from plan
+     * @param {string} feature - Feature to remove
+     */
+    removeFeature(feature) {
+        const index = this.features.indexOf(feature);
+        if (index > -1) {
+            this.features.splice(index, 1);
+            this.updatedAt = new Date().toISOString();
+        }
+    }
+
+    /**
+     * Update plan pricing
+     * @param {Object} newPricing - New pricing object
+     */
+    updatePricing(newPricing) {
+        this.price = { ...this.price, ...newPricing };
+        this.updatedAt = new Date().toISOString();
+    }
+
+    /**
+     * Update plan limits
+     * @param {Object} newLimits - New limits object
+     */
+    updateLimits(newLimits) {
+        this.limits = { ...this.limits, ...newLimits };
+        this.updatedAt = new Date().toISOString();
+    }
+
+    /**
+     * Activate plan
+     */
+    activate() {
+        this.isActive = true;
+        this.updatedAt = new Date().toISOString();
+    }
+
+    /**
+     * Deactivate plan
+     */
+    deactivate() {
+        this.isActive = false;
+        this.updatedAt = new Date().toISOString();
+    }
+
+    /**
+     * Show plan in public listings
+     */
+    show() {
+        this.isVisible = true;
+        this.updatedAt = new Date().toISOString();
+    }
+
+    /**
+     * Hide plan from public listings
+     */
+    hide() {
+        this.isVisible = false;
+        this.updatedAt = new Date().toISOString();
+    }
+
+    /**
+     * Get default plans for an AI
+     * @param {string} aiName - AI name
+     * @returns {Array<Plan>} Default plans
+     */
+    static getDefaultPlans(aiName) {
         return [
             new Plan({
                 id: 'basic',
-                name: 'Basic Plan',
-                description: 'Basic plan for individual users',
-                price: 29.90,
-                currency: 'BRL',
-                billing_cycle: 'monthly',
-                limits: {
-                    max_users: 1,
-                    max_tokens: 100000,
-                    max_commands: 1000,
-                    max_workflows: 100
+                name: 'Plano Básico',
+                description: 'Ideal para uso pessoal e pequenos projetos',
+                price: {
+                    monthly: 29.90,
+                    yearly: 299.00
                 },
-                features: ['basic_ai_access', 'email_support']
+                features: [
+                    'Até 1.000 comandos/mês',
+                    '5 workflows ativos',
+                    'Suporte por email',
+                    '1 usuário',
+                    '1GB de armazenamento'
+                ],
+                limits: {
+                    commands: 1000,
+                    workflows: 5,
+                    users: 1,
+                    storage: 1,
+                    requests: 10000
+                },
+                trialDays: 7,
+                sortOrder: 1,
+                aiName: aiName
             }),
             new Plan({
                 id: 'professional',
-                name: 'Professional Plan',
-                description: 'Professional plan for small teams',
-                price: 89.90,
-                currency: 'BRL',
-                billing_cycle: 'monthly',
-                limits: {
-                    max_users: 5,
-                    max_tokens: 500000,
-                    max_commands: 5000,
-                    max_workflows: 500
+                name: 'Plano Profissional',
+                description: 'Para equipes e projetos de médio porte',
+                price: {
+                    monthly: 99.90,
+                    yearly: 999.00
                 },
-                features: ['full_ai_access', 'priority_support', 'custom_workflows']
+                features: [
+                    'Até 10.000 comandos/mês',
+                    '50 workflows ativos',
+                    'Suporte prioritário',
+                    'Até 10 usuários',
+                    '10GB de armazenamento',
+                    'Personalização de cores',
+                    'Integrações avançadas'
+                ],
+                limits: {
+                    commands: 10000,
+                    workflows: 50,
+                    users: 10,
+                    storage: 10,
+                    requests: 100000
+                },
+                trialDays: 14,
+                sortOrder: 2,
+                aiName: aiName
             }),
             new Plan({
                 id: 'enterprise',
-                name: 'Enterprise Plan',
-                description: 'Enterprise plan for large organizations',
-                price: 299.90,
-                currency: 'BRL',
-                billing_cycle: 'monthly',
-                limits: {
-                    max_users: 25,
-                    max_tokens: 2000000,
-                    max_commands: 20000,
-                    max_workflows: 2000
+                name: 'Plano Enterprise',
+                description: 'Para grandes empresas e projetos complexos',
+                price: {
+                    monthly: 299.90,
+                    yearly: 2999.00
                 },
-                features: ['full_ai_access', '24h_support', 'custom_workflows', 'api_access', 'advanced_analytics']
+                features: [
+                    'Comandos ilimitados',
+                    'Workflows ilimitados',
+                    'Suporte 24/7',
+                    'Usuários ilimitados',
+                    '100GB de armazenamento',
+                    'Personalização completa',
+                    'Integração com APIs externas',
+                    'SLA garantido',
+                    'Suporte dedicado'
+                ],
+                limits: {
+                    commands: -1, // Unlimited
+                    workflows: -1, // Unlimited
+                    users: -1, // Unlimited
+                    storage: 100,
+                    requests: -1 // Unlimited
+                },
+                trialDays: 30,
+                sortOrder: 3,
+                aiName: aiName
             })
         ];
+    }
+
+    /**
+     * Create a custom plan
+     * @param {string} id - Plan ID
+     * @param {string} name - Plan name
+     * @param {string} aiName - AI name
+     * @param {Object} options - Plan options
+     * @returns {Plan}
+     */
+    static createCustom(id, name, aiName, options = {}) {
+        return new Plan({
+            id,
+            name,
+            aiName,
+            description: options.description || '',
+            price: options.price || { monthly: 0, yearly: 0 },
+            features: options.features || [],
+            limits: options.limits || {},
+            trialDays: options.trialDays || 0,
+            setupFee: options.setupFee || 0,
+            metadata: options.metadata || {}
+        });
+    }
+
+    /**
+     * Compare two plans by price
+     * @param {Plan} planA - First plan
+     * @param {Plan} planB - Second plan
+     * @param {string} cycle - Billing cycle to compare
+     * @returns {number} Comparison result
+     */
+    static compareByCycle(planA, planB, cycle = 'monthly') {
+        const priceA = cycle === 'yearly' ? planA.price.yearly : planA.price.monthly;
+        const priceB = cycle === 'yearly' ? planB.price.yearly : planB.price.monthly;
+
+        return priceA - priceB;
+    }
+
+    /**
+     * Filter plans by visibility and status
+     * @param {Array<Plan>} plans - Plans to filter
+     * @param {boolean} includeHidden - Include hidden plans
+     * @param {boolean} includeInactive - Include inactive plans
+     * @returns {Array<Plan>} Filtered plans
+     */
+    static filterPlans(plans, includeHidden = false, includeInactive = false) {
+        return plans.filter(plan => {
+            if (!includeHidden && !plan.isVisible) return false;
+            if (!includeInactive && !plan.isActive) return false;
+            return true;
+        });
     }
 }
 

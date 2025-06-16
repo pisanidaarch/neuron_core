@@ -1,80 +1,59 @@
 // src/api/support/routes.js
 
 const express = require('express');
-const CommandController = require('./command_controller');
-const TimelineController = require('./timeline_controller');
-const ConfigController = require('./config_controller');
-const TagController = require('./tag_controller');
-const DatabaseController = require('./database_controller');
-const UserDataController = require('./user_data_controller');
-const SNLController = require('./snl_controller');
+const CommandController = require('./controllers/command_controller');
+const DatabaseController = require('./controllers/database_controller');
+const NamespaceController = require('./controllers/namespace_controller');
+const TagController = require('./controllers/tag_controller');
+const TimelineController = require('./controllers/timeline_controller');
+const ConfigController = require('./controllers/config_controller');
+const { ErrorHandler } = require('../../cross/entity/errors');
 
-/**
- * Support API Routes
- */
-function createSupportRoutes(aiName) {
-    const router = express.Router();
+const router = express.Router();
 
-    // Initialize controllers
-    const commandController = new CommandController(aiName);
-    const timelineController = new TimelineController(aiName);
-    const configController = new ConfigController(aiName);
-    const tagController = new TagController(aiName);
-    const databaseController = new DatabaseController();
-    const userDataController = new UserDataController(aiName);
-    const snlController = new SNLController(aiName);
+// Initialize controllers
+const commandController = new CommandController();
+const databaseController = new DatabaseController();
+const namespaceController = new NamespaceController();
+const tagController = new TagController();
+const timelineController = new TimelineController();
+const configController = new ConfigController();
 
-    // Command routes
-    router.post('/command', commandController.createCommand.bind(commandController));
-    router.get('/command/:id', commandController.getCommand.bind(commandController));
-    router.put('/command/:id', commandController.updateCommand.bind(commandController));
-    router.delete('/command/:id', commandController.deleteCommand.bind(commandController));
-    router.get('/commands', commandController.listCommands.bind(commandController));
-    router.get('/commands/search', commandController.searchCommands.bind(commandController));
+// Command routes
+router.post('/:aiName/commands', ErrorHandler.asyncWrapper(commandController.createCommand.bind(commandController)));
+router.get('/:aiName/commands', ErrorHandler.asyncWrapper(commandController.listCommands.bind(commandController)));
+router.get('/:aiName/commands/:commandId', ErrorHandler.asyncWrapper(commandController.getCommand.bind(commandController)));
+router.put('/:aiName/commands/:commandId', ErrorHandler.asyncWrapper(commandController.updateCommand.bind(commandController)));
+router.delete('/:aiName/commands/:commandId', ErrorHandler.asyncWrapper(commandController.deleteCommand.bind(commandController)));
+router.post('/:aiName/commands/search', ErrorHandler.asyncWrapper(commandController.searchCommands.bind(commandController)));
 
-    // Timeline routes
-    router.post('/timeline', timelineController.recordInteraction.bind(timelineController));
-    router.get('/timeline', timelineController.getTimeline.bind(timelineController));
-    router.get('/timeline/search', timelineController.searchTimeline.bind(timelineController));
-    router.post('/timeline/tag', timelineController.addTagToEntry.bind(timelineController));
-    router.get('/timeline/summary', timelineController.getTimelineSummary.bind(timelineController));
-    router.get('/timeline/recent', timelineController.getRecentEntries.bind(timelineController));
+// Database routes (admin only)
+router.post('/:aiName/database', ErrorHandler.asyncWrapper(databaseController.createDatabase.bind(databaseController)));
+router.delete('/:aiName/database/:databaseName', ErrorHandler.asyncWrapper(databaseController.deleteDatabase.bind(databaseController)));
+router.get('/:aiName/database', ErrorHandler.asyncWrapper(databaseController.listDatabases.bind(databaseController)));
 
-    // Config routes
-    router.get('/config', configController.getAIConfig.bind(configController));
-    router.put('/config/theme', configController.updateTheme.bind(configController));
-    router.put('/config/behavior', configController.updateBehavior.bind(configController));
-    router.get('/config/behavior-override', configController.getBehaviorOverride.bind(configController));
-    router.put('/config/behavior-override', configController.setBehaviorOverride.bind(configController));
-    router.post('/config/reset', configController.resetToDefault.bind(configController));
+// Namespace routes
+router.post('/:aiName/namespace', ErrorHandler.asyncWrapper(namespaceController.createNamespace.bind(namespaceController)));
+router.delete('/:aiName/namespace/:database/:namespace', ErrorHandler.asyncWrapper(namespaceController.deleteNamespace.bind(namespaceController)));
+router.get('/:aiName/namespace/:database', ErrorHandler.asyncWrapper(namespaceController.listNamespaces.bind(namespaceController)));
 
-    // Tag routes
-    router.post('/tag', tagController.addTag.bind(tagController));
-    router.delete('/tag', tagController.removeTag.bind(tagController));
-    router.get('/tags', tagController.listTags.bind(tagController));
-    router.post('/tags/match', tagController.matchTags.bind(tagController));
-    router.get('/tag/:tag', tagController.viewTag.bind(tagController));
+// Tag routes
+router.post('/:aiName/tags', ErrorHandler.asyncWrapper(tagController.addTag.bind(tagController)));
+router.delete('/:aiName/tags', ErrorHandler.asyncWrapper(tagController.removeTag.bind(tagController)));
+router.get('/:aiName/tags', ErrorHandler.asyncWrapper(tagController.listTags.bind(tagController)));
 
-    // Database routes
-    router.post('/db', databaseController.createDatabase.bind(databaseController));
-    router.get('/db', databaseController.listDatabases.bind(databaseController));
-    router.delete('/db/:name', databaseController.dropDatabase.bind(databaseController));
-    router.post('/db/:db/namespace', databaseController.createNamespace.bind(databaseController));
-    router.get('/db/:db/namespace', databaseController.listNamespaces.bind(databaseController));
-    router.delete('/db/:db/namespace/:name', databaseController.dropNamespace.bind(databaseController));
+// Timeline routes
+router.get('/:aiName/timeline', ErrorHandler.asyncWrapper(timelineController.getTimeline.bind(timelineController)));
+router.post('/:aiName/timeline/search', ErrorHandler.asyncWrapper(timelineController.searchTimeline.bind(timelineController)));
 
-    // User Data routes
-    router.post('/data/pointer', userDataController.storePointer.bind(userDataController));
-    router.post('/data/structure', userDataController.storeStructure.bind(userDataController));
-    router.post('/data/enum', userDataController.storeEnum.bind(userDataController));
-    router.get('/data/:type/:name', userDataController.getUserData.bind(userDataController));
-    router.get('/data', userDataController.listUserData.bind(userDataController));
-    router.delete('/data/:type/:name', userDataController.deleteUserData.bind(userDataController));
+// Config routes
+router.get('/:aiName/config', ErrorHandler.asyncWrapper(configController.getConfig.bind(configController)));
+router.put('/:aiName/config', ErrorHandler.asyncWrapper(configController.updateConfig.bind(configController)));
+router.put('/:aiName/config/colors', ErrorHandler.asyncWrapper(configController.updateColors.bind(configController)));
+router.put('/:aiName/config/logo', ErrorHandler.asyncWrapper(configController.updateLogo.bind(configController)));
+router.put('/:aiName/config/behavior', ErrorHandler.asyncWrapper(configController.updateBehavior.bind(configController)));
 
-    // SNL routes
-    router.post('/snl', snlController.executeSNL.bind(snlController));
+// SNL execution route
+router.post('/:aiName/snl', ErrorHandler.asyncWrapper(configController.executeSNL.bind(configController)));
 
-    return router;
-}
-
-module.exports = createSupportRoutes;
+module.exports = router;

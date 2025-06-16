@@ -2,16 +2,17 @@
 
 const Plan = require('../../cross/entity/plan');
 const PlanSNL = require('../snl/plan_snl');
-const NeuronDBSender = require('../neuron_db/sender');
+const AISender = require('../neuron_db/ai_sender');
+const { ValidationError, NotFoundError } = require('../../cross/entity/errors');
 
 /**
  * PlanManager - Manages Plan entity operations
  */
 class PlanManager {
-    constructor(aiKey) {
-        this.aiKey = aiKey;
-        this.planSNL = new PlanSNL();
-        this.sender = new NeuronDBSender();
+    constructor(aiToken) {
+        this.aiToken = aiToken;
+        this.snl = new PlanSNL();
+        this.sender = new AISender();
     }
 
     /**
@@ -20,38 +21,18 @@ class PlanManager {
      */
     async initialize() {
         try {
-            const checkCommand = this.planSNL.checkPlansStructureExistsSNL();
-            const checkResponse = await this.sender.executeSNL(checkCommand, this.aiKey);
+            const checkCommand = this.snl.checkPlansStructureExistsSNL();
+            const checkResponse = await this.sender.executeSNL(checkCommand, this.aiToken);
 
-            const exists = this.planSNL.parseStructureExistsResponse(checkResponse);
+            const exists = this.snl.parseStructureExistsResponse(checkResponse);
             if (!exists) {
-                const createCommand = this.planSNL.createPlansStructureSNL();
-                await this.sender.executeSNL(createCommand, this.aiKey);
+                const createCommand = this.snl.createPlansStructureSNL();
+                await this.sender.executeSNL(createCommand, this.aiToken);
+                console.log('✅ Plans structure created');
             }
-
-            // Create default plans if none exist
-            await this.createDefaultPlans();
         } catch (error) {
             console.error('Failed to initialize plans structure:', error);
             throw error;
-        }
-    }
-
-    /**
-     * Create default plans if none exist
-     * @returns {Promise<void>}
-     */
-    async createDefaultPlans() {
-        try {
-            const existingPlans = await this.getAllPlans();
-            if (existingPlans.length === 0) {
-                const defaultPlans = Plan.createDefaultPlans();
-                for (const plan of defaultPlans) {
-                    await this.savePlan(plan);
-                }
-            }
-        } catch (error) {
-            console.error('Failed to create default plans:', error);
         }
     }
 
@@ -64,13 +45,15 @@ class PlanManager {
         try {
             const validation = plan.validate();
             if (!validation.valid) {
-                throw new Error(`Plan validation failed: ${validation.errors.join(', ')}`);
+                throw new ValidationError(`Plan validation failed: ${validation.errors.join(', ')}`);
             }
 
-            const planData = this.planSNL.buildPlanData(plan);
-            const command = this.planSNL.setPlanSNL(plan.id, planData);
-            await this.sender.executeSNL(command, this.aiKey);
+            plan.updatedAt = new Date().toISOString();
+            const planData = this.snl.buildPlanData(plan);
+            const command = this.snl.setPlanSNL(plan.id, planData);
+            await this.sender.executeSNL(command, this.aiToken);
 
+            console.log(`✅ Plan saved: ${plan.id}`);
             return plan;
         } catch (error) {
             console.error('Failed to save plan:', error);
@@ -85,128 +68,231 @@ class PlanManager {
      */
     async getPlan(planId) {
         try {
-            const command = this.planSNL.getPlanSNL(planId);
-            const response = await this.sender.executeSNL(command, this.aiKey);
+            const command = this.snl.getPlanSNL(planId);
+            const response = await this.sender.executeSNL(command, this.aiToken);
 
-            const planData = this.planSNL.parsePlanResponse(response);
-            if (!planData) {
+            if (!response || Object.keys(response).length === 0) {
                 return null;
             }
 
-            return Plan.fromNeuronDB(planId, planData);
+            const planData = this.snl.parsePlanData(response);
+            return Plan.fromObject(planData);
         } catch (error) {
             console.error('Failed to get plan:', error);
-            return null;
+            throw error;
         }
     }
 
     /**
-     * Get all plans
+     * List all plans
+     * @param {Object} options - Filter options
      * @returns {Promise<Plan[]>}
      */
-    async getAllPlans() {
+    async listPlans(options = {}) {
         try {
-            const command = this.planSNL.getAllPlansSNL();
-            const response = await this.sender.executeSNL(command, this.aiKey);
+            const { includeHidden = false, includeInactive = false, sortBy = 'sortOrder' } = options;
 
-            const plansData = this.planSNL.parseAllPlansResponse(response);
+            const command = this.snl.listPlansSNL();
+            const response = await this.sender.executeSNL(command, this.aiToken);
+
+            const planIds = this.snl.parsePlansList(response);
             const plans = [];
 
-            for (const [planId, planData] of Object.entries(plansData)) {
-                const plan = Plan.fromNeuronDB(planId, planData);
-                plans.push(plan);
+            for (const planId of planIds) {
+                const plan = await this.getPlan(planId);
+                if (plan) {
+                    plans.push(plan);
+                }
             }
 
-            return plans;
+            // Filter plans
+            const filteredPlans = Plan.filterPlans(plans, includeHidden, includeInactive);
+
+            // Sort plans
+            return this.sortPlans(filteredPlans, sortBy);
         } catch (error) {
-            console.error('Failed to get all plans:', error);
-            return [];
+            console.error('Failed to list plans:', error);
+            throw error;
         }
     }
 
     /**
-     * Get active plans only
+     * Get active plans for public display
      * @returns {Promise<Plan[]>}
      */
     async getActivePlans() {
         try {
-            const allPlans = await this.getAllPlans();
-            return allPlans.filter(plan => plan.active);
+            const plans = await this.listPlans({
+                includeHidden: false,
+                includeInactive: false
+            });
+
+            return plans.filter(plan => plan.isActive && plan.isVisible);
         } catch (error) {
             console.error('Failed to get active plans:', error);
-            return [];
+            throw error;
         }
     }
 
     /**
-     * Get plans by billing cycle
-     * @param {string} billingCycle - Billing cycle (monthly, yearly)
-     * @returns {Promise<Plan[]>}
+     * Create default plans for AI
+     * @param {string} aiName - AI name
+     * @returns {Promise<void>}
      */
-    async getPlansByBillingCycle(billingCycle) {
+    async createDefaultPlans(aiName) {
         try {
-            const allPlans = await this.getAllPlans();
-            return allPlans.filter(plan => plan.billing_cycle === billingCycle);
-        } catch (error) {
-            console.error('Failed to get plans by billing cycle:', error);
-            return [];
-        }
-    }
+            console.log(`Creating default plans for AI: ${aiName}`);
 
-    /**
-     * Get list of plan IDs
-     * @returns {Promise<string[]>}
-     */
-    async getPlanList() {
-        try {
-            const command = this.planSNL.getListPlansSNL();
-            const response = await this.sender.executeSNL(command, this.aiKey);
+            const defaultPlans = Plan.getDefaultPlans(aiName);
 
-            return this.planSNL.parsePlansListResponse(response);
-        } catch (error) {
-            console.error('Failed to get plan list:', error);
-            return [];
-        }
-    }
-
-    /**
-     * Search plans
-     * @param {string} searchTerm - Search term
-     * @returns {Promise<Plan[]>}
-     */
-    async searchPlans(searchTerm) {
-        try {
-            const command = this.planSNL.searchPlansSNL(searchTerm);
-            const response = await this.sender.executeSNL(command, this.aiKey);
-
-            const searchResults = this.planSNL.parseSearchResponse(response);
-            const plans = [];
-
-            for (const planData of searchResults) {
-                const plan = Plan.fromNeuronDB(planData.id, planData);
-                plans.push(plan);
+            for (const plan of defaultPlans) {
+                // Check if plan already exists
+                const existingPlan = await this.getPlan(plan.id);
+                if (!existingPlan) {
+                    await this.savePlan(plan);
+                    console.log(`✅ Created default plan: ${plan.id}`);
+                } else {
+                    console.log(`✓ Plan already exists: ${plan.id}`);
+                }
             }
 
-            return plans;
+            console.log(`✅ Default plans setup completed for AI: ${aiName}`);
         } catch (error) {
-            console.error('Failed to search plans:', error);
-            return [];
+            console.error(`Failed to create default plans for AI ${aiName}:`, error);
+            throw error;
         }
     }
 
     /**
-     * Remove plan
+     * Update plan pricing
+     * @param {string} planId - Plan ID
+     * @param {Object} newPricing - New pricing
+     * @returns {Promise<Plan>}
+     */
+    async updatePlanPricing(planId, newPricing) {
+        try {
+            const plan = await this.getPlan(planId);
+            if (!plan) {
+                throw new NotFoundError(`Plan not found: ${planId}`);
+            }
+
+            plan.updatePricing(newPricing);
+            return await this.savePlan(plan);
+        } catch (error) {
+            console.error('Failed to update plan pricing:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update plan limits
+     * @param {string} planId - Plan ID
+     * @param {Object} newLimits - New limits
+     * @returns {Promise<Plan>}
+     */
+    async updatePlanLimits(planId, newLimits) {
+        try {
+            const plan = await this.getPlan(planId);
+            if (!plan) {
+                throw new NotFoundError(`Plan not found: ${planId}`);
+            }
+
+            plan.updateLimits(newLimits);
+            return await this.savePlan(plan);
+        } catch (error) {
+            console.error('Failed to update plan limits:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Activate plan
+     * @param {string} planId - Plan ID
+     * @returns {Promise<Plan>}
+     */
+    async activatePlan(planId) {
+        try {
+            const plan = await this.getPlan(planId);
+            if (!plan) {
+                throw new NotFoundError(`Plan not found: ${planId}`);
+            }
+
+            plan.activate();
+            return await this.savePlan(plan);
+        } catch (error) {
+            console.error('Failed to activate plan:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Deactivate plan
+     * @param {string} planId - Plan ID
+     * @returns {Promise<Plan>}
+     */
+    async deactivatePlan(planId) {
+        try {
+            const plan = await this.getPlan(planId);
+            if (!plan) {
+                throw new NotFoundError(`Plan not found: ${planId}`);
+            }
+
+            plan.deactivate();
+            return await this.savePlan(plan);
+        } catch (error) {
+            console.error('Failed to deactivate plan:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete plan
      * @param {string} planId - Plan ID
      * @returns {Promise<boolean>}
      */
-    async removePlan(planId) {
+    async deletePlan(planId) {
         try {
-            const command = this.planSNL.removePlanSNL(planId);
-            await this.sender.executeSNL(command, this.aiKey);
+            const existingPlan = await this.getPlan(planId);
+            if (!existingPlan) {
+                throw new NotFoundError(`Plan not found: ${planId}`);
+            }
+
+            const command = this.snl.removePlanSNL(planId);
+            await this.sender.executeSNL(command, this.aiToken);
+
+            console.log(`✅ Plan deleted: ${planId}`);
             return true;
         } catch (error) {
-            console.error('Failed to remove plan:', error);
-            return false;
+            console.error('Failed to delete plan:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Sort plans by specified criteria
+     * @param {Array<Plan>} plans - Plans to sort
+     * @param {string} sortBy - Sort criteria
+     * @returns {Array<Plan>} Sorted plans
+     */
+    sortPlans(plans, sortBy) {
+        switch (sortBy) {
+            case 'price_monthly_asc':
+                return plans.sort((a, b) => Plan.compareByCycle(a, b, 'monthly'));
+            case 'price_monthly_desc':
+                return plans.sort((a, b) => Plan.compareByCycle(b, a, 'monthly'));
+            case 'price_yearly_asc':
+                return plans.sort((a, b) => Plan.compareByCycle(a, b, 'yearly'));
+            case 'price_yearly_desc':
+                return plans.sort((a, b) => Plan.compareByCycle(b, a, 'yearly'));
+            case 'name':
+                return plans.sort((a, b) => a.name.localeCompare(b.name));
+            case 'created':
+                return plans.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+            case 'updated':
+                return plans.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+            case 'sortOrder':
+            default:
+                return plans.sort((a, b) => a.sortOrder - b.sortOrder);
         }
     }
 
@@ -216,243 +302,95 @@ class PlanManager {
      * @returns {Promise<boolean>}
      */
     async planExists(planId) {
-        const plan = await this.getPlan(planId);
-        return plan !== null;
+        try {
+            const plan = await this.getPlan(planId);
+            return plan !== null;
+        } catch (error) {
+            return false;
+        }
     }
 
     /**
-     * Create plan
-     * @param {string} planId - Plan ID
-     * @param {string} name - Plan name
-     * @param {string} description - Plan description
-     * @param {number} price - Plan price
-     * @param {Object} limits - Plan limits
-     * @param {string[]} features - Plan features
-     * @returns {Promise<Plan>}
+     * Get plan comparison data
+     * @param {Array<string>} planIds - Plan IDs to compare
+     * @returns {Promise<Object>} Comparison data
      */
-    async createPlan(planId, name, description, price, limits = {}, features = []) {
+    async comparePlans(planIds) {
         try {
-            const plan = new Plan({
-                id: planId,
-                name,
-                description,
-                price,
-                limits: {
-                    max_users: 1,
-                    max_tokens: 100000,
-                    max_commands: 1000,
-                    max_workflows: 100,
-                    ...limits
-                },
-                features
+            const plans = [];
+            for (const planId of planIds) {
+                const plan = await this.getPlan(planId);
+                if (plan) {
+                    plans.push(plan);
+                }
+            }
+
+            // Extract all unique features
+            const allFeatures = new Set();
+            plans.forEach(plan => {
+                plan.features.forEach(feature => allFeatures.add(feature));
             });
 
-            return await this.savePlan(plan);
+            // Extract all unique limit types
+            const allLimitTypes = new Set();
+            plans.forEach(plan => {
+                Object.keys(plan.limits).forEach(limitType => allLimitTypes.add(limitType));
+            });
+
+            return {
+                plans: plans.map(plan => plan.toObject()),
+                features: Array.from(allFeatures),
+                limitTypes: Array.from(allLimitTypes),
+                comparison: this.buildComparisonMatrix(plans, Array.from(allFeatures), Array.from(allLimitTypes))
+            };
         } catch (error) {
-            console.error('Failed to create plan:', error);
+            console.error('Failed to compare plans:', error);
             throw error;
         }
     }
 
     /**
-     * Activate plan
-     * @param {string} planId - Plan ID
-     * @returns {Promise<boolean>}
+     * Build comparison matrix
+     * @param {Array<Plan>} plans - Plans to compare
+     * @param {Array<string>} features - All features
+     * @param {Array<string>} limitTypes - All limit types
+     * @returns {Object} Comparison matrix
      */
-    async activatePlan(planId) {
-        try {
-            const plan = await this.getPlan(planId);
-            if (!plan) {
-                throw new Error('Plan not found');
-            }
+    buildComparisonMatrix(plans, features, limitTypes) {
+        const matrix = {
+            features: {},
+            limits: {},
+            pricing: {}
+        };
 
-            plan.activate();
-            await this.savePlan(plan);
-            return true;
-        } catch (error) {
-            console.error('Failed to activate plan:', error);
-            return false;
-        }
-    }
+        // Features matrix
+        features.forEach(feature => {
+            matrix.features[feature] = {};
+            plans.forEach(plan => {
+                matrix.features[feature][plan.id] = plan.hasFeature(feature);
+            });
+        });
 
-    /**
-     * Deactivate plan
-     * @param {string} planId - Plan ID
-     * @returns {Promise<boolean>}
-     */
-    async deactivatePlan(planId) {
-        try {
-            const plan = await this.getPlan(planId);
-            if (!plan) {
-                throw new Error('Plan not found');
-            }
+        // Limits matrix
+        limitTypes.forEach(limitType => {
+            matrix.limits[limitType] = {};
+            plans.forEach(plan => {
+                matrix.limits[limitType][plan.id] = plan.limits[limitType] || 0;
+            });
+        });
 
-            plan.deactivate();
-            await this.savePlan(plan);
-            return true;
-        } catch (error) {
-            console.error('Failed to deactivate plan:', error);
-            return false;
-        }
-    }
+        // Pricing matrix
+        plans.forEach(plan => {
+            matrix.pricing[plan.id] = {
+                monthly: plan.price.monthly,
+                yearly: plan.price.yearly,
+                yearlySavings: plan.getYearlySavings(),
+                trialDays: plan.trialDays,
+                setupFee: plan.setupFee
+            };
+        });
 
-    /**
-     * Update plan limits
-     * @param {string} planId - Plan ID
-     * @param {Object} newLimits - New limits
-     * @returns {Promise<boolean>}
-     */
-    async updatePlanLimits(planId, newLimits) {
-        try {
-            const plan = await this.getPlan(planId);
-            if (!plan) {
-                throw new Error('Plan not found');
-            }
-
-            plan.updateLimits(newLimits);
-            await this.savePlan(plan);
-            return true;
-        } catch (error) {
-            console.error('Failed to update plan limits:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Add feature to plan
-     * @param {string} planId - Plan ID
-     * @param {string} feature - Feature name
-     * @returns {Promise<boolean>}
-     */
-    async addFeatureToPlan(planId, feature) {
-        try {
-            const plan = await this.getPlan(planId);
-            if (!plan) {
-                throw new Error('Plan not found');
-            }
-
-            plan.addFeature(feature);
-            await this.savePlan(plan);
-            return true;
-        } catch (error) {
-            console.error('Failed to add feature to plan:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Remove feature from plan
-     * @param {string} planId - Plan ID
-     * @param {string} feature - Feature name
-     * @returns {Promise<boolean>}
-     */
-    async removeFeatureFromPlan(planId, feature) {
-        try {
-            const plan = await this.getPlan(planId);
-            if (!plan) {
-                throw new Error('Plan not found');
-            }
-
-            plan.removeFeature(feature);
-            await this.savePlan(plan);
-            return true;
-        } catch (error) {
-            console.error('Failed to remove feature from plan:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Get plan pricing information
-     * @returns {Promise<Array>}
-     */
-    async getPlanPricing() {
-        try {
-            const command = this.planSNL.getPlanPricingSNL();
-            const response = await this.sender.executeSNL(command, this.aiKey);
-
-            return this.planSNL.parsePlanPricing(response);
-        } catch (error) {
-            console.error('Failed to get plan pricing:', error);
-            return [];
-        }
-    }
-
-    /**
-     * Get plan limits
-     * @param {string} planId - Plan ID
-     * @returns {Promise<Object|null>}
-     */
-    async getPlanLimits(planId) {
-        try {
-            const command = this.planSNL.getPlanLimitsSNL(planId);
-            const response = await this.sender.executeSNL(command, this.aiKey);
-
-            return this.planSNL.parsePlanLimits(response);
-        } catch (error) {
-            console.error('Failed to get plan limits:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Check if plan allows specific user count
-     * @param {string} planId - Plan ID
-     * @param {number} userCount - User count to check
-     * @returns {Promise<boolean>}
-     */
-    async planAllowsUserCount(planId, userCount) {
-        try {
-            const plan = await this.getPlan(planId);
-            if (!plan) {
-                return false;
-            }
-
-            return plan.allowsUserCount(userCount);
-        } catch (error) {
-            console.error('Failed to check plan user count:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Check if plan allows specific token usage
-     * @param {string} planId - Plan ID
-     * @param {number} tokens - Token count to check
-     * @returns {Promise<boolean>}
-     */
-    async planAllowsTokens(planId, tokens) {
-        try {
-            const plan = await this.getPlan(planId);
-            if (!plan) {
-                return false;
-            }
-
-            return plan.allowsTokens(tokens);
-        } catch (error) {
-            console.error('Failed to check plan token usage:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Check if plan has feature
-     * @param {string} planId - Plan ID
-     * @param {string} feature - Feature to check
-     * @returns {Promise<boolean>}
-     */
-    async planHasFeature(planId, feature) {
-        try {
-            const plan = await this.getPlan(planId);
-            if (!plan) {
-                return false;
-            }
-
-            return plan.hasFeature(feature);
-        } catch (error) {
-            console.error('Failed to check plan feature:', error);
-            return false;
-        }
+        return matrix;
     }
 }
 

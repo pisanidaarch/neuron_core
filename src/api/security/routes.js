@@ -1,44 +1,46 @@
 // src/api/security/routes.js
 
 const express = require('express');
-const AuthController = require('./auth_controller');
-const PermissionController = require('./permission_controller');
-const SubscriptionController = require('./subscription_controller');
+const AuthController = require('./controllers/auth_controller');
+const PermissionController = require('./controllers/permission_controller');
+const SubscriptionController = require('./controllers/subscription_controller');
+const UserController = require('./controllers/user_controller');
+const { ErrorHandler } = require('../../cross/entity/errors');
 
-const router = express.Router({ mergeParams: true });
+const router = express.Router();
 
 // Initialize controllers
 const authController = new AuthController();
 const permissionController = new PermissionController();
 const subscriptionController = new SubscriptionController();
+const userController = new UserController();
 
 // Authentication routes
-router.post('/login', (req, res) => authController.login(req, res));
-router.get('/validate', (req, res) => authController.validate(req, res));
-router.post('/change-password', (req, res) => authController.changePassword(req, res));
-router.post('/create-user', (req, res) => authController.createUser(req, res));
+router.post('/:aiName/auth/login', ErrorHandler.asyncWrapper(authController.login.bind(authController)));
+router.post('/:aiName/auth/validate', ErrorHandler.asyncWrapper(authController.validateToken.bind(authController)));
+router.post('/:aiName/auth/change-password', ErrorHandler.asyncWrapper(authController.changePassword.bind(authController)));
+router.post('/:aiName/auth/logout', ErrorHandler.asyncWrapper(authController.logout.bind(authController)));
+router.post('/:aiName/auth/refresh', ErrorHandler.asyncWrapper(authController.refreshToken.bind(authController)));
+router.get('/:aiName/auth/me', ErrorHandler.asyncWrapper(authController.getCurrentUser.bind(authController)));
 
 // Permission routes
-router.get('/permissions', (req, res) => authController.getPermissions(req, res));
-router.post('/permissions/set', (req, res) => authController.setPermission(req, res));
+router.get('/:aiName/permissions/groups', ErrorHandler.asyncWrapper(permissionController.listGroups.bind(permissionController)));
+router.get('/:aiName/permissions/validate', ErrorHandler.asyncWrapper(permissionController.validatePermissions.bind(permissionController)));
+router.get('/:aiName/permissions/users/:username', ErrorHandler.asyncWrapper(permissionController.getUserPermissions.bind(permissionController)));
 
-// Group management routes
-router.get('/groups', (req, res) => permissionController.listGroups(req, res));
-router.post('/groups/create', (req, res) => permissionController.createGroup(req, res));
-router.post('/groups/add-user', (req, res) => permissionController.addUserToGroup(req, res));
-router.post('/groups/remove-user', (req, res) => permissionController.removeUserFromGroup(req, res));
-router.get('/groups/:groupName/members', (req, res) => permissionController.getGroupMembers(req, res));
+// User management routes
+router.post('/:aiName/users/create', ErrorHandler.asyncWrapper(userController.createUser.bind(userController)));
+router.get('/:aiName/users/:username', ErrorHandler.asyncWrapper(userController.getUser.bind(userController)));
+router.put('/:aiName/users/:username', ErrorHandler.asyncWrapper(userController.updateUser.bind(userController)));
+router.delete('/:aiName/users/:username', ErrorHandler.asyncWrapper(userController.deleteUser.bind(userController)));
+router.get('/:aiName/users', ErrorHandler.asyncWrapper(userController.listUsers.bind(userController)));
 
-// Role management routes
-router.get('/roles', (req, res) => permissionController.getUserGroups(req, res));
-router.post('/roles/set', (req, res) => permissionController.setUserRole(req, res));
-
-// Subscription and plan routes
-router.get('/plans', (req, res) => subscriptionController.getPlans(req, res));
-router.get('/plans/:planId', (req, res) => subscriptionController.getPlan(req, res));
-router.post('/subscription/create', (req, res) => subscriptionController.createSubscription(req, res));
-router.post('/subscription/change-plan', (req, res) => subscriptionController.changePlan(req, res));
-router.post('/subscription/cancel', (req, res) => subscriptionController.cancelPlan(req, res));
-router.post('/subscription/add-user', (req, res) => subscriptionController.addUserToSubscription(req, res));
+// Subscription routes
+router.get('/:aiName/subscriptions/plans', ErrorHandler.asyncWrapper(subscriptionController.getPlans.bind(subscriptionController)));
+router.get('/:aiName/subscriptions/plan', ErrorHandler.asyncWrapper(subscriptionController.getCurrentPlan.bind(subscriptionController)));
+router.post('/:aiName/subscriptions/change-plan', ErrorHandler.asyncWrapper(subscriptionController.changePlan.bind(subscriptionController)));
+router.post('/:aiName/subscriptions/cancel', ErrorHandler.asyncWrapper(subscriptionController.cancelPlan.bind(subscriptionController)));
+router.get('/:aiName/subscriptions/usage', ErrorHandler.asyncWrapper(subscriptionController.getUsage.bind(subscriptionController)));
+router.get('/:aiName/subscriptions/billing', ErrorHandler.asyncWrapper(subscriptionController.getBillingHistory.bind(subscriptionController)));
 
 module.exports = router;

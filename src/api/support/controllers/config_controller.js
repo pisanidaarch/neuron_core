@@ -1,154 +1,422 @@
 // src/api/support/controllers/config_controller.js
 
-const AIConfig = require('../../../cross/entity/ai_config');
-const ConfigManager = require('../../../data/manager/config_manager');
-const ConfigSender = require('../../../data/neuron_db/config_sender');
-const KeysVO = require('../../../cross/entity/keys_vo');
-const AuthMiddleware = require('../../security/middleware/auth_middleware');
+const { getInstance } = require('../../../data/manager/keys_vo_manager');
+const ConfigurationManager = require('../../../data/manager/configuration_manager');
+const AISender = require('../../../data/neuron_db/ai_sender');
+const Configuration = require('../../../cross/entity/configuration');
+const { AuthenticationError, ValidationError, AuthorizationError } = require('../../../cross/entity/errors');
 
 /**
- * ConfigController - Handles AI configuration operations
+ * Config Controller for NeuronCore Support API
  */
 class ConfigController {
     constructor() {
-        this.configManager = new ConfigManager();
-        this.authMiddleware = new AuthMiddleware();
+        this.sender = new AISender();
     }
 
     /**
-     * Get AI configuration
+     * Get AI token for operations
+     * @param {string} aiName - AI name
+     * @returns {Promise<string>}
+     */
+    async getAIToken(aiName) {
+        const keysManager = getInstance();
+        const keysVO = await keysManager.getKeysVO();
+        return keysVO.getAIToken(aiName);
+    }
+
+    /**
+     * Validate user token and permissions
+     * @param {string} token - JWT token
+     * @param {string} requiredPermission - Required permission
+     * @returns {Promise<Object>}
+     */
+    async validateUserPermissions(token, requiredPermission = null) {
+        if (!token) {
+            throw new AuthenticationError('Token is required');
+        }
+
+        const userInfo = await this.sender.validateToken(token);
+
+        if (requiredPermission) {
+            const hasPermission = userInfo.groups?.includes('admin') ||
+                                userInfo.permissions?.some(p => p.permission === requiredPermission);
+
+            if (!hasPermission) {
+                throw new AuthorizationError(`Permission required: ${requiredPermission}`);
+            }
+        }
+
+        return userInfo;
+    }
+
+    /**
+     * Get configuration endpoint
+     * @param {Object} req - Express request
+     * @param {Object} res - Express response
      */
     async getConfig(req, res) {
         try {
-            const { ai_name } = req.params;
+            const { aiName } = req.params;
             const token = req.headers.authorization?.replace('Bearer ', '');
-
-            if (!token) {
-                return res.status(401).json({ error: 'Authorization token required' });
-            }
 
             // Validate token
-            const userInfo = await this.authMiddleware.validateToken(token, ai_name);
-            if (!userInfo) {
-                return res.status(401).json({ error: 'Invalid token' });
-            }
+            await this.validateUserPermissions(token);
 
-            // Initialize manager with config sender
-            const keysVO = await KeysVO.getInstance();
-            const configSender = new ConfigSender(keysVO);
-            this.configManager.initialize(configSender);
+            // Get AI token
+            const aiToken = await this.getAIToken(aiName);
 
-            let config = await this.configManager.getConfig(ai_name, keysVO.getConfigToken());
-
-            // If no config exists, return default
-            if (!config) {
-                config = new AIConfig({ ai_name });
-            }
+            // Get configuration
+            const configManager = new ConfigurationManager(aiToken);
+            const config = await configManager.getConfiguration(aiName);
 
             res.json({
-                success: true,
-                data: config
+                error: false,
+                data: config ? config.toObject() : Configuration.createDefault(aiName).toObject()
             });
 
         } catch (error) {
-            console.error('Error getting config:', error);
-            res.status(500).json({ error: error.message });
+            console.error('Get config error:', error);
+
+            if (error instanceof AuthenticationError || error instanceof AuthorizationError) {
+                res.status(error.statusCode).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'Failed to get configuration'
+                });
+            }
         }
     }
 
     /**
-     * Update theme
+     * Update configuration endpoint
+     * @param {Object} req - Express request
+     * @param {Object} res - Express response
      */
-    async updateTheme(req, res) {
+    async updateConfig(req, res) {
         try {
-            const { ai_name } = req.params;
-            const themeData = req.body;
+            const { aiName } = req.params;
+            const token = req.headers.authorization?.replace('Bearer ', '');
+            const configData = req.body;
+
+            // Validate token and admin permissions
+            const userInfo = await this.validateUserPermissions(token, 'config.manage');
+
+            // Get AI token
+            const aiToken = await this.getAIToken(aiName);
+
+            // Get current configuration
+            const configManager = new ConfigurationManager(aiToken);
+            let config = await configManager.getConfiguration(aiName);
+
+            if (!config) {
+                config = Configuration.createDefault(aiName);
+            }
+
+            // Update configuration with provided data
+            if (configData.ui) config.updateUI(configData.ui);
+            if (configData.features) config.updateFeatures(configData.features);
+            if (configData.limits) config.updateLimits(configData.limits);
+            if (configData.integrations) config.updateIntegrations(configData.integrations);
+
+            config.updatedBy = userInfo.username;
+
+            // Save configuration
+            await configManager.saveConfiguration(config);
+
+            res.json({
+                error: false,
+                message: 'Configuration updated successfully',
+                data: config.toObject()
+            });
+
+        } catch (error) {
+            console.error('Update config error:', error);
+
+            if (error instanceof AuthenticationError || error instanceof ValidationError || error instanceof AuthorizationError) {
+                res.status(error.statusCode).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'Failed to update configuration'
+                });
+            }
+        }
+    }
+
+    /**
+     * Update colors endpoint
+     * @param {Object} req - Express request
+     * @param {Object} res - Express response
+     */
+    async updateColors(req, res) {
+        try {
+            const { aiName } = req.params;
+            const { colors } = req.body;
             const token = req.headers.authorization?.replace('Bearer ', '');
 
-            if (!token) {
-                return res.status(401).json({ error: 'Authorization token required' });
+            // Validate token and admin permissions
+            const userInfo = await this.validateUserPermissions(token, 'config.colors');
+
+            if (!colors) {
+                throw new ValidationError('Colors data is required');
             }
 
-            // Validate token and check admin permission
-            const userInfo = await this.authMiddleware.validateToken(token, ai_name);
-            if (!userInfo) {
-                return res.status(401).json({ error: 'Invalid token' });
+            // Get AI token
+            const aiToken = await this.getAIToken(aiName);
+
+            // Get current configuration
+            const configManager = new ConfigurationManager(aiToken);
+            let config = await configManager.getConfiguration(aiName);
+
+            if (!config) {
+                config = Configuration.createDefault(aiName);
             }
 
-            // Check if user is admin for this AI
-            const isAdmin = userInfo.groups && userInfo.groups.includes('admin');
-            if (!isAdmin) {
-                return res.status(403).json({ error: 'Admin permission required to update theme' });
+            // Check if user can customize colors
+            if (!config.canCustomizeColors(userInfo)) {
+                throw new AuthorizationError('Color customization not allowed');
             }
 
-            // Initialize manager with config sender
-            const keysVO = await KeysVO.getInstance();
-            const configSender = new ConfigSender(keysVO);
-            this.configManager.initialize(configSender);
+            // Validate color formats
+            if (colors.primary) {
+                for (const [key, value] of Object.entries(colors.primary)) {
+                    if (!Configuration.isValidHexColor(value)) {
+                        throw new ValidationError(`Invalid hex color format for primary.${key}: ${value}`);
+                    }
+                }
+            }
 
-            const success = await this.configManager.updateTheme(
-                ai_name,
-                themeData,
-                userInfo.email,
-                keysVO.getConfigToken()
-            );
+            if (colors.secondary) {
+                for (const [key, value] of Object.entries(colors.secondary)) {
+                    if (!Configuration.isValidHexColor(value)) {
+                        throw new ValidationError(`Invalid hex color format for secondary.${key}: ${value}`);
+                    }
+                }
+            }
+
+            if (colors.gradients) {
+                for (const [key, value] of Object.entries(colors.gradients)) {
+                    if (!Configuration.isValidGradient(value)) {
+                        throw new ValidationError(`Invalid gradient format for gradients.${key}: ${value}`);
+                    }
+                }
+            }
+
+            // Update colors
+            config.updateColors(colors);
+            config.updatedBy = userInfo.username;
+
+            // Save configuration
+            await configManager.saveConfiguration(config);
 
             res.json({
-                success,
-                message: success ? 'Theme updated successfully' : 'Failed to update theme'
+                error: false,
+                message: 'Colors updated successfully',
+                data: {
+                    colors: config.colors,
+                    cssVariables: config.getCSSVariables()
+                }
             });
 
         } catch (error) {
-            console.error('Error updating theme:', error);
-            res.status(500).json({ error: error.message });
+            console.error('Update colors error:', error);
+
+            if (error instanceof AuthenticationError || error instanceof ValidationError || error instanceof AuthorizationError) {
+                res.status(error.statusCode).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'Failed to update colors'
+                });
+            }
         }
     }
 
     /**
-     * Update behavior
+     * Update logo endpoint
+     * @param {Object} req - Express request
+     * @param {Object} res - Express response
+     */
+    async updateLogo(req, res) {
+        try {
+            const { aiName } = req.params;
+            const { logo } = req.body;
+            const token = req.headers.authorization?.replace('Bearer ', '');
+
+            // Validate token and admin permissions
+            const userInfo = await this.validateUserPermissions(token, 'config.logo');
+
+            if (!logo) {
+                throw new ValidationError('Logo data is required');
+            }
+
+            // Get AI token
+            const aiToken = await this.getAIToken(aiName);
+
+            // Get current configuration
+            const configManager = new ConfigurationManager(aiToken);
+            let config = await configManager.getConfiguration(aiName);
+
+            if (!config) {
+                config = Configuration.createDefault(aiName);
+            }
+
+            // Update logo
+            config.updateLogo(logo);
+            config.updatedBy = userInfo.username;
+
+            // Save configuration
+            await configManager.saveConfiguration(config);
+
+            res.json({
+                error: false,
+                message: 'Logo updated successfully',
+                data: {
+                    logo: config.logo
+                }
+            });
+
+        } catch (error) {
+            console.error('Update logo error:', error);
+
+            if (error instanceof AuthenticationError || error instanceof ValidationError || error instanceof AuthorizationError) {
+                res.status(error.statusCode).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'Failed to update logo'
+                });
+            }
+        }
+    }
+
+    /**
+     * Update behavior endpoint
+     * @param {Object} req - Express request
+     * @param {Object} res - Express response
      */
     async updateBehavior(req, res) {
         try {
-            const { ai_name } = req.params;
-            const behaviorData = req.body;
+            const { aiName } = req.params;
+            const { behavior } = req.body;
             const token = req.headers.authorization?.replace('Bearer ', '');
 
-            if (!token) {
-                return res.status(401).json({ error: 'Authorization token required' });
+            // Validate token and admin permissions
+            const userInfo = await this.validateUserPermissions(token, 'config.behavior');
+
+            if (typeof behavior !== 'string') {
+                throw new ValidationError('Behavior must be a string');
             }
 
-            // Validate token and check admin permission
-            const userInfo = await this.authMiddleware.validateToken(token, ai_name);
-            if (!userInfo) {
-                return res.status(401).json({ error: 'Invalid token' });
+            // Get AI token
+            const aiToken = await this.getAIToken(aiName);
+
+            // Get current configuration
+            const configManager = new ConfigurationManager(aiToken);
+            let config = await configManager.getConfiguration(aiName);
+
+            if (!config) {
+                config = Configuration.createDefault(aiName);
             }
 
-            // Check if user is admin for this AI
-            const isAdmin = userInfo.groups && userInfo.groups.includes('admin');
-            if (!isAdmin) {
-                return res.status(403).json({ error: 'Admin permission required to update behavior' });
+            // Check if user can customize behavior
+            if (!config.canCustomizeBehavior(userInfo)) {
+                throw new AuthorizationError('Behavior customization not allowed');
             }
 
-            // Initialize manager with config sender
-            const keysVO = await KeysVO.getInstance();
-            const configSender = new ConfigSender(keysVO);
-            this.configManager.initialize(configSender);
+            // Update behavior
+            config.updateBehavior(behavior);
+            config.updatedBy = userInfo.username;
 
-            const success = await this.configManager.updateBehavior(
-                ai_name,
-                behaviorData,
-                userInfo.email,
-                keysVO.getConfigToken()
-            );
+            // Save configuration
+            await configManager.saveConfiguration(config);
 
             res.json({
-                success,
-                message: success ? 'Behavior updated successfully' : 'Failed to update behavior'
+                error: false,
+                message: 'Behavior updated successfully',
+                data: {
+                    behavior: config.behavior
+                }
             });
 
         } catch (error) {
-            console.error('Error updating behavior:', error);
-            res.status(500).json({ error: error.message });
+            console.error('Update behavior error:', error);
+
+            if (error instanceof AuthenticationError || error instanceof ValidationError || error instanceof AuthorizationError) {
+                res.status(error.statusCode).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'Failed to update behavior'
+                });
+            }
+        }
+    }
+
+    /**
+     * Execute SNL command endpoint
+     * @param {Object} req - Express request
+     * @param {Object} res - Express response
+     */
+    async executeSNL(req, res) {
+        try {
+            const { aiName } = req.params;
+            const { command } = req.body;
+            const token = req.headers.authorization?.replace('Bearer ', '');
+
+            // Validate token and admin permissions
+            await this.validateUserPermissions(token, 'snl.execute');
+
+            if (!command || typeof command !== 'string') {
+                throw new ValidationError('SNL command is required');
+            }
+
+            // Get AI token
+            const aiToken = await this.getAIToken(aiName);
+
+            // Execute SNL command
+            const result = await this.sender.executeSNL(command, aiToken);
+
+            res.json({
+                error: false,
+                message: 'SNL command executed successfully',
+                data: {
+                    command: command,
+                    result: result
+                }
+            });
+
+        } catch (error) {
+            console.error('Execute SNL error:', error);
+
+            if (error instanceof AuthenticationError || error instanceof ValidationError || error instanceof AuthorizationError) {
+                res.status(error.statusCode).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'Failed to execute SNL command'
+                });
+            }
         }
     }
 }

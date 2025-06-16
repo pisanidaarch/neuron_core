@@ -2,31 +2,33 @@
 
 const Subscription = require('../../cross/entity/subscription');
 const SubscriptionSNL = require('../snl/subscription_snl');
-const NeuronDBSender = require('../neuron_db/sender');
+const AISender = require('../neuron_db/ai_sender');
+const { ValidationError, NotFoundError } = require('../../cross/entity/errors');
 
 /**
  * SubscriptionManager - Manages Subscription entity operations
  */
 class SubscriptionManager {
-    constructor(aiKey) {
-        this.aiKey = aiKey;
-        this.subscriptionSNL = new SubscriptionSNL();
-        this.sender = new NeuronDBSender();
+    constructor(aiToken) {
+        this.aiToken = aiToken;
+        this.snl = new SubscriptionSNL();
+        this.sender = new AISender();
     }
 
     /**
-     * Initialize subscriptions structure if needed
+     * Initialize subscription structure if needed
      * @returns {Promise<void>}
      */
     async initialize() {
         try {
-            const checkCommand = this.subscriptionSNL.checkSubscriptionsStructureExistsSNL();
-            const checkResponse = await this.sender.executeSNL(checkCommand, this.aiKey);
+            const checkCommand = this.snl.checkSubscriptionsStructureExistsSNL();
+            const checkResponse = await this.sender.executeSNL(checkCommand, this.aiToken);
 
-            const exists = this.subscriptionSNL.parseStructureExistsResponse(checkResponse);
+            const exists = this.snl.parseStructureExistsResponse(checkResponse);
             if (!exists) {
-                const createCommand = this.subscriptionSNL.createSubscriptionsStructureSNL();
-                await this.sender.executeSNL(createCommand, this.aiKey);
+                const createCommand = this.snl.createSubscriptionsStructureSNL();
+                await this.sender.executeSNL(createCommand, this.aiToken);
+                console.log('✅ Subscriptions structure created');
             }
         } catch (error) {
             console.error('Failed to initialize subscriptions structure:', error);
@@ -43,16 +45,40 @@ class SubscriptionManager {
         try {
             const validation = subscription.validate();
             if (!validation.valid) {
-                throw new Error(`Subscription validation failed: ${validation.errors.join(', ')}`);
+                throw new ValidationError(`Subscription validation failed: ${validation.errors.join(', ')}`);
             }
 
-            const subscriptionData = this.subscriptionSNL.buildSubscriptionData(subscription);
-            const command = this.subscriptionSNL.setSubscriptionSNL(subscription.user_email, subscriptionData);
-            await this.sender.executeSNL(command, this.aiKey);
+            subscription.updatedAt = new Date().toISOString();
+            const subscriptionData = this.snl.buildSubscriptionData(subscription);
+            const command = this.snl.setSubscriptionSNL(subscription.id, subscriptionData);
+            await this.sender.executeSNL(command, this.aiToken);
 
+            console.log(`✅ Subscription saved: ${subscription.id}`);
             return subscription;
         } catch (error) {
             console.error('Failed to save subscription:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get subscription by ID
+     * @param {string} subscriptionId - Subscription ID
+     * @returns {Promise<Subscription|null>}
+     */
+    async getSubscription(subscriptionId) {
+        try {
+            const command = this.snl.getSubscriptionSNL(subscriptionId);
+            const response = await this.sender.executeSNL(command, this.aiToken);
+
+            if (!response || Object.keys(response).length === 0) {
+                return null;
+            }
+
+            const subscriptionData = this.snl.parseSubscriptionData(response);
+            return Subscription.fromObject(subscriptionData);
+        } catch (error) {
+            console.error('Failed to get subscription:', error);
             throw error;
         }
     }
@@ -62,307 +88,159 @@ class SubscriptionManager {
      * @param {string} userEmail - User email
      * @returns {Promise<Subscription|null>}
      */
-    async getSubscription(userEmail) {
+    async getSubscriptionByUser(userEmail) {
         try {
-            const command = this.subscriptionSNL.getSubscriptionSNL(userEmail);
-            const response = await this.sender.executeSNL(command, this.aiKey);
+            const command = this.snl.getSubscriptionByUserSNL(userEmail);
+            const response = await this.sender.executeSNL(command, this.aiToken);
 
-            const subscriptionData = this.subscriptionSNL.parseSubscriptionResponse(response);
-            if (!subscriptionData) {
+            if (!response || Object.keys(response).length === 0) {
                 return null;
             }
 
-            return Subscription.fromNeuronDB(userEmail, subscriptionData);
+            const subscriptionData = this.snl.parseSubscriptionData(response);
+            return Subscription.fromObject(subscriptionData);
         } catch (error) {
-            console.error('Failed to get subscription:', error);
-            return null;
+            console.error('Failed to get subscription by user:', error);
+            throw error;
         }
     }
 
     /**
-     * Get all subscriptions
+     * List all subscriptions
+     * @param {Object} options - Filter options
      * @returns {Promise<Subscription[]>}
      */
-    async getAllSubscriptions() {
+    async listSubscriptions(options = {}) {
         try {
-            const command = this.subscriptionSNL.getAllSubscriptionsSNL();
-            const response = await this.sender.executeSNL(command, this.aiKey);
+            const { status, planId, page = 1, limit = 20 } = options;
 
-            const subscriptionsData = this.subscriptionSNL.parseAllSubscriptionsResponse(response);
+            const command = this.snl.listSubscriptionsSNL();
+            const response = await this.sender.executeSNL(command, this.aiToken);
+
+            const subscriptionIds = this.snl.parseSubscriptionsList(response);
             const subscriptions = [];
 
-            for (const [userEmail, subscriptionData] of Object.entries(subscriptionsData)) {
-                const subscription = Subscription.fromNeuronDB(userEmail, subscriptionData);
-                subscriptions.push(subscription);
+            for (const subscriptionId of subscriptionIds) {
+                const subscription = await this.getSubscription(subscriptionId);
+                if (subscription) {
+                    // Apply filters
+                    if (status && subscription.status !== status) continue;
+                    if (planId && subscription.planId !== planId) continue;
+
+                    subscriptions.push(subscription);
+                }
             }
 
-            return subscriptions;
+            // Apply pagination
+            const startIndex = (page - 1) * limit;
+            const endIndex = startIndex + limit;
+            return subscriptions.slice(startIndex, endIndex);
         } catch (error) {
-            console.error('Failed to get all subscriptions:', error);
-            return [];
+            console.error('Failed to list subscriptions:', error);
+            throw error;
         }
     }
 
     /**
-     * Get active subscriptions only
-     * @returns {Promise<Subscription[]>}
-     */
-    async getActiveSubscriptions() {
-        try {
-            const allSubscriptions = await this.getAllSubscriptions();
-            return allSubscriptions.filter(subscription => subscription.isActive());
-        } catch (error) {
-            console.error('Failed to get active subscriptions:', error);
-            return [];
-        }
-    }
-
-    /**
-     * Get subscriptions by plan
-     * @param {string} planId - Plan ID
-     * @returns {Promise<Subscription[]>}
-     */
-    async getSubscriptionsByPlan(planId) {
-        try {
-            const command = this.subscriptionSNL.getSubscriptionsByPlanSNL(planId);
-            const response = await this.sender.executeSNL(command, this.aiKey);
-
-            const searchResults = this.subscriptionSNL.parseSearchResponse(response);
-            const subscriptions = [];
-
-            for (const subscriptionData of searchResults) {
-                const subscription = Subscription.fromNeuronDB(subscriptionData.user_email, subscriptionData);
-                subscriptions.push(subscription);
-            }
-
-            return subscriptions;
-        } catch (error) {
-            console.error('Failed to get subscriptions by plan:', error);
-            return [];
-        }
-    }
-
-    /**
-     * Get list of user emails with subscriptions
-     * @returns {Promise<string[]>}
-     */
-    async getSubscriptionList() {
-        try {
-            const command = this.subscriptionSNL.getListSubscriptionsSNL();
-            const response = await this.sender.executeSNL(command, this.aiKey);
-
-            return this.subscriptionSNL.parseSubscriptionsListResponse(response);
-        } catch (error) {
-            console.error('Failed to get subscription list:', error);
-            return [];
-        }
-    }
-
-    /**
-     * Search subscriptions
-     * @param {string} searchTerm - Search term
-     * @returns {Promise<Subscription[]>}
-     */
-    async searchSubscriptions(searchTerm) {
-        try {
-            const command = this.subscriptionSNL.searchSubscriptionsSNL(searchTerm);
-            const response = await this.sender.executeSNL(command, this.aiKey);
-
-            const searchResults = this.subscriptionSNL.parseSearchResponse(response);
-            const subscriptions = [];
-
-            for (const subscriptionData of searchResults) {
-                const subscription = Subscription.fromNeuronDB(subscriptionData.user_email, subscriptionData);
-                subscriptions.push(subscription);
-            }
-
-            return subscriptions;
-        } catch (error) {
-            console.error('Failed to search subscriptions:', error);
-            return [];
-        }
-    }
-
-    /**
-     * Remove subscription
-     * @param {string} userEmail - User email
-     * @returns {Promise<boolean>}
-     */
-    async removeSubscription(userEmail) {
-        try {
-            const command = this.subscriptionSNL.removeSubscriptionSNL(userEmail);
-            await this.sender.executeSNL(command, this.aiKey);
-            return true;
-        } catch (error) {
-            console.error('Failed to remove subscription:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Check if subscription exists
-     * @param {string} userEmail - User email
-     * @returns {Promise<boolean>}
-     */
-    async subscriptionExists(userEmail) {
-        const subscription = await this.getSubscription(userEmail);
-        return subscription !== null;
-    }
-
-    /**
-     * Create subscription
-     * @param {string} userEmail - User email
-     * @param {string} planId - Plan ID
-     * @param {Object} paymentInfo - Payment information
+     * Update subscription status
+     * @param {string} subscriptionId - Subscription ID
+     * @param {string} status - New status
+     * @param {string} reason - Reason for change
      * @returns {Promise<Subscription>}
      */
-    async createSubscription(userEmail, planId, paymentInfo = {}) {
+    async updateSubscriptionStatus(subscriptionId, status, reason = '') {
         try {
-            const subscription = new Subscription({
-                user_email: userEmail,
-                plan_id: planId,
-                payment_info: paymentInfo,
-                status: 'active'
-            });
+            const subscription = await this.getSubscription(subscriptionId);
+            if (!subscription) {
+                throw new NotFoundError(`Subscription not found: ${subscriptionId}`);
+            }
 
+            subscription.updateStatus(status, reason);
             return await this.saveSubscription(subscription);
         } catch (error) {
-            console.error('Failed to create subscription:', error);
+            console.error('Failed to update subscription status:', error);
             throw error;
         }
     }
 
     /**
      * Cancel subscription
-     * @param {string} userEmail - User email
-     * @param {Date} endDate - Optional end date
-     * @returns {Promise<boolean>}
+     * @param {string} subscriptionId - Subscription ID
+     * @param {string} reason - Cancellation reason
+     * @param {Date} effectiveDate - When cancellation takes effect
+     * @returns {Promise<Subscription>}
      */
-    async cancelSubscription(userEmail, endDate = null) {
+    async cancelSubscription(subscriptionId, reason = '', effectiveDate = null) {
         try {
-            const subscription = await this.getSubscription(userEmail);
+            const subscription = await this.getSubscription(subscriptionId);
             if (!subscription) {
-                throw new Error('Subscription not found');
+                throw new NotFoundError(`Subscription not found: ${subscriptionId}`);
             }
 
-            subscription.cancel(endDate);
-            await this.saveSubscription(subscription);
-            return true;
+            subscription.cancel(reason, effectiveDate);
+            return await this.saveSubscription(subscription);
         } catch (error) {
             console.error('Failed to cancel subscription:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Change subscription plan
-     * @param {string} userEmail - User email
-     * @param {string} newPlanId - New plan ID
-     * @returns {Promise<boolean>}
-     */
-    async changeSubscriptionPlan(userEmail, newPlanId) {
-        try {
-            const subscription = await this.getSubscription(userEmail);
-            if (!subscription) {
-                throw new Error('Subscription not found');
-            }
-
-            subscription.changePlan(newPlanId);
-            await this.saveSubscription(subscription);
-            return true;
-        } catch (error) {
-            console.error('Failed to change subscription plan:', error);
-            return false;
+            throw error;
         }
     }
 
     /**
      * Renew subscription
-     * @param {string} userEmail - User email
-     * @param {string} newPlanId - Optional new plan ID
-     * @param {Date} newEndDate - Optional new end date
-     * @returns {Promise<boolean>}
+     * @param {string} subscriptionId - Subscription ID
+     * @returns {Promise<Subscription>}
      */
-    async renewSubscription(userEmail, newPlanId = null, newEndDate = null) {
+    async renewSubscription(subscriptionId) {
         try {
-            const subscription = await this.getSubscription(userEmail);
+            const subscription = await this.getSubscription(subscriptionId);
             if (!subscription) {
-                throw new Error('Subscription not found');
+                throw new NotFoundError(`Subscription not found: ${subscriptionId}`);
             }
 
-            subscription.renew(newPlanId, newEndDate);
-            await this.saveSubscription(subscription);
-            return true;
+            subscription.renew();
+            return await this.saveSubscription(subscription);
         } catch (error) {
             console.error('Failed to renew subscription:', error);
-            return false;
+            throw error;
         }
     }
 
     /**
-     * Add user to subscription
-     * @param {string} userEmail - User email
-     * @param {number} maxUsers - Maximum users allowed by plan
-     * @returns {Promise<boolean>}
+     * Change subscription plan
+     * @param {string} subscriptionId - Subscription ID
+     * @param {string} newPlanId - New plan ID
+     * @param {string} billingCycle - Billing cycle
+     * @returns {Promise<Subscription>}
      */
-    async addUserToSubscription(userEmail, maxUsers) {
+    async changePlan(subscriptionId, newPlanId, billingCycle = 'monthly') {
         try {
-            const subscription = await this.getSubscription(userEmail);
+            const subscription = await this.getSubscription(subscriptionId);
             if (!subscription) {
-                throw new Error('Subscription not found');
+                throw new NotFoundError(`Subscription not found: ${subscriptionId}`);
             }
 
-            const success = subscription.addUser(maxUsers);
-            if (success) {
-                await this.saveSubscription(subscription);
-            }
-            return success;
+            subscription.changePlan(newPlanId, billingCycle);
+            return await this.saveSubscription(subscription);
         } catch (error) {
-            console.error('Failed to add user to subscription:', error);
-            return false;
+            console.error('Failed to change subscription plan:', error);
+            throw error;
         }
     }
 
     /**
-     * Remove user from subscription
-     * @param {string} userEmail - User email
-     * @returns {Promise<boolean>}
+     * Get active subscriptions count
+     * @returns {Promise<number>}
      */
-    async removeUserFromSubscription(userEmail) {
+    async getActiveSubscriptionsCount() {
         try {
-            const subscription = await this.getSubscription(userEmail);
-            if (!subscription) {
-                throw new Error('Subscription not found');
-            }
-
-            subscription.removeUser();
-            await this.saveSubscription(subscription);
-            return true;
+            const activeSubscriptions = await this.listSubscriptions({
+                status: 'active',
+                limit: 10000
+            });
+            return activeSubscriptions.length;
         } catch (error) {
-            console.error('Failed to remove user from subscription:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Update user count
-     * @param {string} userEmail - User email
-     * @param {number} count - New user count
-     * @returns {Promise<boolean>}
-     */
-    async updateUserCount(userEmail, count) {
-        try {
-            const subscription = await this.getSubscription(userEmail);
-            if (!subscription) {
-                throw new Error('Subscription not found');
-            }
-
-            subscription.updateUserCount(count);
-            await this.saveSubscription(subscription);
-            return true;
-        } catch (error) {
-            console.error('Failed to update user count:', error);
-            return false;
+            console.error('Failed to get active subscriptions count:', error);
+            throw error;
         }
     }
 
@@ -370,40 +248,116 @@ class SubscriptionManager {
      * Get subscription statistics
      * @returns {Promise<Object>}
      */
-    async getSubscriptionStats() {
+    async getSubscriptionStatistics() {
         try {
-            const command = this.subscriptionSNL.getSubscriptionStatsSNL();
-            const response = await this.sender.executeSNL(command, this.aiKey);
+            const allSubscriptions = await this.listSubscriptions({ limit: 10000 });
 
-            return this.subscriptionSNL.parseSubscriptionStats(response);
-        } catch (error) {
-            console.error('Failed to get subscription stats:', error);
-            return {
-                total: 0,
-                active: 0,
-                cancelled: 0,
-                expired: 0
+            const stats = {
+                total: allSubscriptions.length,
+                byStatus: {},
+                byPlan: {},
+                totalRevenue: 0,
+                averageRevenue: 0
             };
+
+            let totalRevenue = 0;
+
+            allSubscriptions.forEach(subscription => {
+                // Count by status
+                stats.byStatus[subscription.status] = (stats.byStatus[subscription.status] || 0) + 1;
+
+                // Count by plan
+                stats.byPlan[subscription.planId] = (stats.byPlan[subscription.planId] || 0) + 1;
+
+                // Calculate revenue (mock calculation)
+                if (subscription.status === 'active') {
+                    totalRevenue += subscription.amount || 0;
+                }
+            });
+
+            stats.totalRevenue = totalRevenue;
+            stats.averageRevenue = allSubscriptions.length > 0 ? totalRevenue / allSubscriptions.length : 0;
+
+            return stats;
+        } catch (error) {
+            console.error('Failed to get subscription statistics:', error);
+            throw error;
         }
     }
 
     /**
-     * Check if subscription allows more users
-     * @param {string} userEmail - User email
-     * @param {number} maxUsers - Maximum users allowed by plan
-     * @returns {Promise<boolean>}
+     * Find expiring subscriptions
+     * @param {number} daysAhead - Days ahead to check
+     * @returns {Promise<Subscription[]>}
      */
-    async canAddUser(userEmail, maxUsers) {
+    async findExpiringSubscriptions(daysAhead = 7) {
         try {
-            const subscription = await this.getSubscription(userEmail);
+            const allSubscriptions = await this.listSubscriptions({
+                status: 'active',
+                limit: 10000
+            });
+
+            const checkDate = new Date();
+            checkDate.setDate(checkDate.getDate() + daysAhead);
+
+            return allSubscriptions.filter(subscription => {
+                if (!subscription.currentPeriodEnd) return false;
+                const endDate = new Date(subscription.currentPeriodEnd);
+                return endDate <= checkDate;
+            });
+        } catch (error) {
+            console.error('Failed to find expiring subscriptions:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Process subscription renewal
+     * @param {string} subscriptionId - Subscription ID
+     * @param {Object} paymentResult - Payment processing result
+     * @returns {Promise<Subscription>}
+     */
+    async processRenewal(subscriptionId, paymentResult) {
+        try {
+            const subscription = await this.getSubscription(subscriptionId);
             if (!subscription) {
-                return false;
+                throw new NotFoundError(`Subscription not found: ${subscriptionId}`);
             }
 
-            return subscription.canAddUser(maxUsers);
+            if (paymentResult.success) {
+                subscription.renew();
+                subscription.addPayment(paymentResult);
+            } else {
+                subscription.updateStatus('payment_failed', 'Payment processing failed');
+            }
+
+            return await this.saveSubscription(subscription);
         } catch (error) {
-            console.error('Failed to check if can add user:', error);
-            return false;
+            console.error('Failed to process subscription renewal:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete subscription (admin only)
+     * @param {string} subscriptionId - Subscription ID
+     * @returns {Promise<boolean>}
+     */
+    async deleteSubscription(subscriptionId) {
+        try {
+            const existingSubscription = await this.getSubscription(subscriptionId);
+            if (!existingSubscription) {
+                throw new NotFoundError(`Subscription not found: ${subscriptionId}`);
+            }
+
+            const command = this.snl.removeSubscriptionSNL(subscriptionId);
+            await this.sender.executeSNL(command, this.aiToken);
+
+            console.log(`✅ Subscription deleted: ${subscriptionId}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to delete subscription:', error);
+            throw error;
         }
     }
 }

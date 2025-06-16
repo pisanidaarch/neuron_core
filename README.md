@@ -1,94 +1,132 @@
-# NeuronCore Security Module
+# NeuronCore - Sistema de IA Multi-Instância
 
-## 🔐 Overview
+O NeuronCore é um backend robusto para sistemas de inteligência artificial que oferece gerenciamento multi-instância, autenticação avançada, timeline de interações e suporte completo a workflows.
 
-O módulo de segurança do NeuronCore fornece autenticação, autorização, gerenciamento de usuários, grupos e assinaturas para múltiplas instâncias de IA. Este módulo garante isolamento completo entre diferentes AIs e controle granular de acesso.
+## 🚀 Principais Características
 
-## 🏗️ Arquitetura
+- **Multi-IA**: Suporte a múltiplas instâncias de IA simultaneamente
+- **Segurança Avançada**: Autenticação JWT, grupos de usuários e permissões granulares
+- **Timeline**: Histórico completo de interações com sistema de tags
+- **Workflows**: Sistema de comandos personalizáveis e agendamento
+- **Configuração Flexível**: Temas personalizáveis e comportamentos configuráveis
+- **SNL Integration**: Integração nativa com NeuronDB usando linguagem SNL
 
-```
-src/
-├── cross/entity/          # Entidades compartilhadas
-│   ├── user.js
-│   ├── user_group.js
-│   ├── subscription.js
-│   ├── plan.js
-│   └── permission.js
-├── data/
-│   ├── snl/              # Comandos SNL
-│   │   ├── user_snl.js
-│   │   ├── user_group_snl.js
-│   │   ├── subscription_snl.js
-│   │   └── plan_snl.js
-│   ├── manager/          # Gerenciadores de entidades
-│   │   ├── user_manager.js
-│   │   ├── user_group_manager.js
-│   │   ├── subscription_manager.js
-│   │   └── plan_manager.js
-│   └── initializer/      # Inicialização de bancos
-│       └── database_initializer.js
-└── api/security/         # Controllers e rotas
-    ├── auth_controller.js
-    ├── permission_controller.js
-    ├── subscription_controller.js
-    └── routes.js
-```
+## 📋 Pré-requisitos
 
-## 🚀 Quick Start
+- Node.js 18+ 
+- NeuronDB Server rodando e acessível
+- NPM ou Yarn
 
-### 1. Instalação e Configuração
+## 🛠️ Instalação
 
+### 1. Clone o repositório
 ```bash
-# Instalar dependências
+git clone <repository-url>
+cd neuron-core
+```
+
+### 2. Instale as dependências
+```bash
 npm install
+```
 
-# Configurar tokens
+### 3. Configure o sistema
+```bash
+# Copie o arquivo de exemplo
 cp config.json.example config.json
-# Editar config.json com seus tokens reais
+
+# Edite config.json com suas configurações
+nano config.json
 ```
 
-### 2. Inicializar Sistema
+### 4. Configuração do config.json
 
+```json
+{
+  "database": {
+    "config_url": "http://localhost:8080",
+    "config_token": "seu_token_de_config_aqui"
+  },
+  "ai_instances": {
+    "minha_ia": {
+      "name": "minha_ia",
+      "url": "http://localhost:8080", 
+      "token": "token_da_minha_ia_aqui"
+    }
+  },
+  "security": {
+    "jwt_secret": "seu_jwt_secret_super_seguro_aqui",
+    "token_expiry": "24h"
+  },
+  "server": {
+    "port": 3000,
+    "cors_origin": "*"
+  }
+}
+```
+
+### 5. Inicie o servidor
 ```bash
-# Iniciar servidor
 npm start
-
-# O sistema automaticamente:
-# - Cria bancos de dados necessários
-# - Inicializa estruturas
-# - Cria usuário subscription_admin
-# - Cria grupos padrão (admin, default, subscription_admin)
 ```
 
-### 3. Verificar Inicialização
+O servidor será iniciado na porta 3000 (ou a porta configurada) e automaticamente:
+- Criará os bancos de dados necessários
+- Inicializará as estruturas de dados
+- Criará o usuário administrativo de subscription
+- Configurará grupos e permissões padrão
 
-```bash
-# Verificar status dos bancos
-curl http://localhost:3000/admin/database/status
+## 🔧 Estrutura do Projeto
 
-# Forçar reinicialização se necessário
-curl -X POST http://localhost:3000/admin/database/initialize
+```
+neuron-core/
+├── src/
+│   ├── api/                    # Camada de API
+│   │   ├── security/           # Endpoints de segurança
+│   │   └── support/            # Endpoints de suporte
+│   ├── core/                   # Lógica de negócio principal (futuro)
+│   ├── cross/                  # Entidades compartilhadas
+│   │   └── entity/             # Entidades de domínio
+│   ├── data/                   # Camada de dados
+│   │   ├── manager/            # Gerenciadores de entidades
+│   │   ├── snl/               # Comandos SNL
+│   │   ├── neuron_db/         # Senders para NeuronDB
+│   │   └── initializer/       # Inicializadores de banco
+│   └── support/               # Módulo de suporte (futuro)
+├── config.json               # Configuração do sistema
+├── package.json              # Dependências NPM
+└── README.md                 # Este arquivo
 ```
 
-## 🔑 Autenticação
+## 🔐 Módulo de Segurança
 
-### Login
+### Grupos Padrão
+
+- **subscription_admin**: Grupo para integração com gateways de pagamento
+- **admin**: Administradores que podem gerenciar usuários e configurações
+- **default**: Usuários padrão da IA
+
+### Usuário Padrão
+
+- **Email**: `subscription_admin@system.local`
+- **Senha**: `sudo_subscription_admin`
+- **Grupo**: `subscription_admin`
+
+### Endpoints de Autenticação
+
 ```bash
+# Login
 POST /{ai_name}/security/login
 {
   "username": "user@example.com",
   "password": "password123"
 }
-```
 
-### Validar Token
-```bash
+# Validar token
 GET /{ai_name}/security/validate
 Authorization: Bearer {token}
-```
 
-### Trocar Senha
-```bash
+# Trocar senha
 POST /{ai_name}/security/change-password
 Authorization: Bearer {token}
 {
@@ -96,10 +134,10 @@ Authorization: Bearer {token}
 }
 ```
 
-## 👥 Gerenciamento de Usuários
+### Gerenciamento de Usuários
 
-### Criar Usuário (Admin)
 ```bash
+# Criar usuário (Admin)
 POST /{ai_name}/security/create-user
 Authorization: Bearer {admin_token}
 {
@@ -107,16 +145,12 @@ Authorization: Bearer {admin_token}
   "password": "password123",
   "nick": "New User"
 }
-```
 
-### Obter Permissões
-```bash
+# Obter permissões
 GET /{ai_name}/security/permissions
 Authorization: Bearer {token}
-```
 
-### Definir Permissão (Admin)
-```bash
+# Definir permissão (Admin)
 POST /{ai_name}/security/permissions/set
 Authorization: Bearer {admin_token}
 {
@@ -131,311 +165,203 @@ Authorization: Bearer {admin_token}
 - `2` - Write (escrita)
 - `3` - Admin (administrador)
 
-## 👪 Gerenciamento de Grupos
+## 📚 Módulo de Support
 
-### Listar Grupos
+### Timeline
+
+O sistema de timeline registra todas as interações e permite busca avançada:
+
 ```bash
-GET /{ai_name}/security/groups
+# Registrar entrada na timeline
+POST /{ai_name}/support/timeline/record
+Authorization: Bearer {token}
+{
+  "entity_name": "chat",
+  "input": "Hello, world!",
+  "output": "Hi there!",
+  "tags": ["test", "greeting"]
+}
+
+# Buscar por período
+GET /{ai_name}/support/timeline?year=2025&month=6&entity=chat
+Authorization: Bearer {token}
+
+# Buscar por termo
+GET /{ai_name}/support/timeline/search?query=hello
 Authorization: Bearer {token}
 ```
 
-### Criar Grupo (Admin)
+### Configuração de IA
+
 ```bash
-POST /{ai_name}/security/groups/create
+# Obter configuração
+GET /{ai_name}/support/config
+Authorization: Bearer {token}
+
+# Atualizar tema (Admin apenas)
+PUT /{ai_name}/support/config/theme
 Authorization: Bearer {admin_token}
 {
-  "groupName": "developers",
-  "description": "Development team"
+  "primary_colors": {
+    "black": "#000000",
+    "white": "#FFFFFF",
+    "dark_blue": "#0363AE",
+    "dark_purple": "#50038F"
+  }
 }
 ```
 
-### Adicionar Usuário ao Grupo (Admin)
+### Sistema de Tags
+
 ```bash
-POST /{ai_name}/security/groups/add-user
-Authorization: Bearer {admin_token}
+# Adicionar tag
+POST /{ai_name}/support/tag
+Authorization: Bearer {token}
 {
-  "email": "user@example.com",
-  "groupName": "admin"
+  "database": "timeline",
+  "namespace": "user_namespace",
+  "entity": "chat_entry",
+  "tag": "important"
 }
-```
 
-### Remover Usuário do Grupo (Admin)
-```bash
-POST /{ai_name}/security/groups/remove-user
-Authorization: Bearer {admin_token}
-{
-  "email": "user@example.com",
-  "groupName": "default"
-}
-```
-
-### Definir Papel do Usuário (Admin)
-```bash
-POST /{ai_name}/security/roles/set
-Authorization: Bearer {admin_token}
-{
-  "email": "user@example.com",
-  "role": "admin"  // "admin" ou "default"
-}
-```
-
-## 💳 Gerenciamento de Assinaturas
-
-### Listar Planos
-```bash
-GET /{ai_name}/security/plans
+# Listar tags
+GET /{ai_name}/support/tags?database=timeline&namespace=user_namespace
 Authorization: Bearer {token}
 ```
 
-### Obter Plano Específico
+### Operações SNL Diretas
+
 ```bash
-GET /{ai_name}/security/plans/{planId}
+# Executar comando SNL
+POST /{ai_name}/support/snl
 Authorization: Bearer {token}
-```
-
-### Criar Assinatura (Gateway de Pagamento)
-```bash
-POST /{ai_name}/security/subscription/create
-Authorization: Bearer {subscription_admin_token}
 {
-  "email": "subscriber@example.com",
-  "planId": "basic",
-  "password": "optional_password"
+  "command": "list(database)\non()"
 }
 ```
 
-### Alterar Plano (Admin)
+## 🎨 Esquema de Cores Padrão
+
+### Cores Principais
+- **Preto**: `#000000` (fundo principal)
+- **Branco**: `#FFFFFF` (tipografia)
+- **Azul Escuro**: `#0363AE` (gradiente principal)
+- **Roxo Escuro**: `#50038F` (gradiente principal)
+
+### Cores Secundárias
+- **Roxo**: `#6332F5` (destaque)
+- **Turquesa**: `#54D3EC` (gradiente secundário)
+- **Azul**: `#2F62CD` (destaque de texto)
+- **Verde-azulado**: `#3AA3A9` (marcadores)
+
+### Gradientes
+- **Principal**: `#50038F` → `#0363AE`
+- **Secundário**: `#6332F5` → `#54D3EC`
+
+## 📊 Endpoints de Administração
+
 ```bash
-POST /{ai_name}/security/subscription/change-plan
-Authorization: Bearer {admin_token}
-{
-  "email": "subscriber@example.com",
-  "oldPlanId": "basic",
-  "newPlanId": "professional"
-}
+# Status dos bancos de dados
+GET /admin/database/status
+
+# Forçar inicialização
+POST /admin/database/initialize
+
+# Status de saúde
+GET /health
 ```
 
-### Cancelar Assinatura (Admin)
-```bash
-POST /{ai_name}/security/subscription/cancel
-Authorization: Bearer {admin_token}
-{
-  "email": "subscriber@example.com"
-}
-```
+## 🧪 Testes com Postman
 
-### Adicionar Usuário à Assinatura (Admin)
-```bash
-POST /{ai_name}/security/subscription/add-user
-Authorization: Bearer {admin_token}
-{
-  "subscriptionOwner": "subscriber@example.com",
-  "newUserEmail": "teammember@example.com",
-  "password": "optional_password"
-}
-```
+Importe a coleção Postman incluída no projeto para testar todos os endpoints. A coleção inclui:
 
-## 🎭 Grupos Padrão
+- Todas as operações de segurança
+- Operações de timeline
+- Gerenciamento de configuração
+- Operações de banco de dados
+- Sistema de tags
+- Execução de SNL
 
-### subscription_admin
-- **Propósito**: Integração com gateway de pagamento
-- **Usuário**: `subscription_admin@system.local`
-- **Senha**: `sudo_subscription_admin`
-- **Permissões**: Criar/cancelar/alterar assinaturas
-- **Visibilidade**: Oculto (não aparece em listagens)
+### Variáveis da Coleção
+- `base_url`: http://localhost:3000
+- `ai_name`: nome da sua instância de IA
+- `auth_token`: token do usuário (preenchido automaticamente)
+- `admin_token`: token do admin (preenchido automaticamente)
 
-### admin
-- **Propósito**: Administradores da IA
-- **Permissões**: 
-  - Criar/gerenciar usuários
-  - Alterar configurações da IA
-  - Gerenciar grupos
-  - Alterar/cancelar planos
+## 🔧 Desenvolvimento
 
-### default
-- **Propósito**: Usuários padrão
-- **Permissões**: Usar a IA
+### Estrutura de Código
 
-## 🗄️ Bancos de Dados
+- **Entidades**: Modelos de domínio em `src/cross/entity/`
+- **Managers**: Lógica de negócio em `src/data/manager/`
+- **SNL**: Comandos de banco em `src/data/snl/`
+- **Controllers**: Endpoints em `src/api/`
 
-O sistema cria automaticamente os seguintes bancos:
+### Padrões Utilizados
 
-- **main**: Dados principais (usuários, grupos, assinaturas, planos)
-- **timeline**: Histórico de interações dos usuários
-- **user-data**: Dados pessoais dos usuários
-- **workflow**: Workflows ativos
-- **workflow-hist**: Histórico de workflows
-- **schedule**: Tarefas agendadas
-
-## 🧪 Testes
-
-### Postman Collection
-Importe a coleção `NeuronCore-Security.postman_collection.json` no Postman para testes completos.
-
-### Cenários de Teste
-
-1. **Fluxo Completo de Usuário**
-   - Criar conta
-   - Login
-   - Promover para admin
-   - Verificar permissões
-
-2. **Gerenciamento de Assinatura**
-   - Criar assinatura básica
-   - Upgrade para profissional
-   - Adicionar membro da equipe
-
-3. **Testes de Erro**
-   - Credenciais inválidas
-   - Acesso sem token
-   - Operações sem permissão
-
-### Executar Testes
-```bash
-# Executar todos os testes
-npm test
-
-# Executar testes específicos
-npm run test:security
-```
-
-## 🔐 Segurança
-
-### Tokens JWT
-- Gerados pelo NeuronDB
-- Contêm permissões do usuário
-- Validados a cada requisição
-
-### Isolamento Multi-Tenant
-- Cada IA tem dados completamente isolados
-- Validação rigorosa do nome da IA
-- Tokens específicos por IA
-
-### Controle de Acesso
-- Permissões granulares por banco de dados
-- Grupos de usuários com papéis definidos
-- Verificação de permissões em todas as operações
+- **Repository Pattern**: Para acesso a dados
+- **Singleton Pattern**: Para gerenciamento de chaves (KeysVO)
+- **DTO Pattern**: Para transferência de dados entre camadas
+- **Command Pattern**: Para operações SNL
 
 ## 🐛 Troubleshooting
 
-### Erro: "AI token not found"
-```bash
-# Verificar configuração das AIs
-curl http://localhost:3000/config/ai/{ai_name}
+### Erro: "Cannot find module '../snl/subscription_snl'"
+- Certifique-se de que todos os arquivos SNL foram criados
+- Verifique se os caminhos estão corretos
 
-# Reinicializar KeysVO
-curl -X POST http://localhost:3000/admin/database/initialize
-```
+### Erro: "Config token not available"
+- Verifique se o arquivo `config.json` está configurado corretamente
+- Confirme se os tokens do NeuronDB estão válidos
 
-### Erro: "Subscription admin not found"
-```bash
-# Verificar se usuário existe
-curl -X POST http://localhost:3000/admin/database/initialize
+### Erro de conexão com NeuronDB
+- Verifique se o NeuronDB está rodando
+- Confirme as URLs e tokens no config.json
+- Teste a conectividade manualmente
 
-# Login manual
-curl -X POST http://localhost:3000/{ai_name}/security/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"subscription_admin@system.local","password":"sudo_subscription_admin"}'
-```
+### Problemas de inicialização
+- Use o endpoint `/admin/database/initialize` para forçar reinicialização
+- Verifique logs detalhados no console
+- Confirme permissões dos tokens
 
-### Erro: "Database not initialized"
-```bash
-# Forçar inicialização
-curl -X POST http://localhost:3000/admin/database/initialize
+## 📈 Monitoramento
 
-# Verificar status
-curl http://localhost:3000/admin/database/status
-```
+O sistema fornece endpoints de monitoramento:
 
-## 📖 Exemplos Práticos
+- `/health`: Status geral do sistema
+- `/admin/database/status`: Status detalhado dos bancos
 
-### Cenário: E-commerce com IA
-```bash
-# 1. Gateway de pagamento cria assinatura
-POST /ecommerce-ai/security/subscription/create
-Authorization: Bearer {subscription_admin_token}
-{
-  "email": "loja@exemplo.com",
-  "planId": "professional"
-}
+## 🔒 Segurança
 
-# 2. Dono da loja adiciona funcionário
-POST /ecommerce-ai/security/subscription/add-user
-Authorization: Bearer {admin_token}
-{
-  "subscriptionOwner": "loja@exemplo.com",
-  "newUserEmail": "funcionario@exemplo.com"
-}
+- Tokens JWT com expiração configurável
+- Permissões granulares por banco de dados
+- Isolamento completo entre instâncias de IA
+- Grupos de usuários com controle de acesso
+- Validação de entrada em todos os endpoints
 
-# 3. Funcionário faz login
-POST /ecommerce-ai/security/login
-{
-  "username": "funcionario@exemplo.com",
-  "password": "generated_password"
-}
-```
+## 🚀 Produção
 
-### Cenário: Empresa com Múltiplos Departamentos
-```bash
-# 1. Criar grupos departamentais
-POST /empresa-ai/security/groups/create
-{
-  "groupName": "vendas",
-  "description": "Equipe de vendas"
-}
+Para deploy em produção:
 
-# 2. Adicionar usuários aos grupos
-POST /empresa-ai/security/groups/add-user
-{
-  "email": "vendedor@empresa.com",
-  "groupName": "vendas"
-}
+1. Configure `NODE_ENV=production`
+2. Use tokens seguros e únicos
+3. Configure CORS adequadamente
+4. Use HTTPS
+5. Configure logs apropriados
+6. Monitore performance e uso
 
-# 3. Configurar permissões específicas
-POST /empresa-ai/security/permissions/set
-{
-  "email": "vendedor@empresa.com",
-  "database": "user-data",
-  "level": 2
-}
-```
+## 📝 License
 
-## 🔄 Integrações
+Este projeto está sob a licença MIT. Veja o arquivo LICENSE para detalhes.
 
-### Gateway de Pagamento
-Use o token `subscription_admin` para:
-- Criar assinaturas após pagamento
-- Cancelar assinaturas por falta de pagamento
-- Alterar planos por upgrade/downgrade
+## 🤝 Contribuição
 
-### Sistema de CRM
-Integre com os endpoints de usuários para:
-- Sincronizar dados de clientes
-- Gerenciar permissões automaticamente
-- Criar relatórios de uso
+1. Fork o projeto
+2. Crie uma branch para sua feature
+3. Commit suas mudanças
+4. Push para a branch
+5. Abra um Pull Request
 
-## 📝 Logs e Monitoramento
+---
 
-O sistema registra automaticamente:
-- Todas as operações de autenticação
-- Mudanças de permissões
-- Criação/alteração de assinaturas
-- Erros de acesso
-
-Logs são enviados para `console` e podem ser integrados com sistemas como ELK Stack ou Datadog.
-
-## 🚨 Alertas
-
-Configure alertas para:
-- Tentativas de login falhadas
-- Criação de usuários admin
-- Alterações em assinaturas
-- Erros de sistema
-
-## 📞 Suporte
-
-Para dúvidas ou problemas:
-1. Verifique os logs de erro
-2. Consulte a seção Troubleshooting
-3. Execute os testes da coleção Postman
-4. Verifique o status dos bancos de dados
+**NeuronCore** - Elevando a inteligência artificial a um novo patamar 🧠✨

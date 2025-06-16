@@ -1,81 +1,36 @@
-// src/api/support/database_controller.js
+// src/api/support/tag_controller.js
 
-const DatabaseService = require('../../core/support/database_service');
+const TagService = require('../../core/support/tag_service');
 const { AuthenticationError } = require('../../cross/entity/errors');
 
 /**
- * Database Controller - HTTP layer for database operations
+ * Tag Controller - HTTP layer for tag operations
  */
-class DatabaseController {
-    constructor() {
-        this.service = new DatabaseService();
+class TagController {
+    constructor(aiName) {
+        this.service = new TagService(aiName);
     }
 
     /**
-     * Create database
+     * Add tag to entity
      */
-    async createDatabase(req, res) {
+    async addTag(req, res) {
         try {
             const { body, user, token } = this._extractRequestData(req);
-            const { name } = body;
+            const { database, namespace, entity, tag } = body;
 
-            if (!name) {
+            if (!database || !namespace || !entity || !tag) {
                 return res.status(400).json({
                     error: true,
-                    message: 'Database name is required'
+                    message: 'Database, namespace, entity, and tag are required'
                 });
             }
 
-            const result = await this.service.createDatabase(
-                name,
-                user.permissions,
-                user.email,
-                token
-            );
-
-            res.status(201).json({
-                error: false,
-                message: 'Database created successfully',
-                data: result
-            });
-
-        } catch (error) {
-            this._handleError(error, res);
-        }
-    }
-
-    /**
-     * List databases
-     */
-    async listDatabases(req, res) {
-        try {
-            const { user, token } = this._extractRequestData(req);
-
-            const result = await this.service.listDatabases(
-                user.permissions,
-                token
-            );
-
-            res.json({
-                error: false,
-                data: result
-            });
-
-        } catch (error) {
-            this._handleError(error, res);
-        }
-    }
-
-    /**
-     * Drop database
-     */
-    async dropDatabase(req, res) {
-        try {
-            const { params, user, token } = this._extractRequestData(req);
-            const { name } = params;
-
-            const result = await this.service.dropDatabase(
-                name,
+            const result = await this.service.addTag(
+                database,
+                namespace,
+                entity,
+                tag,
                 user.permissions,
                 user.email,
                 token
@@ -83,7 +38,7 @@ class DatabaseController {
 
             res.json({
                 error: false,
-                message: 'Database dropped successfully',
+                message: 'Tag added successfully',
                 data: result
             });
 
@@ -93,32 +48,33 @@ class DatabaseController {
     }
 
     /**
-     * Create namespace
+     * Remove tag from entity
      */
-    async createNamespace(req, res) {
+    async removeTag(req, res) {
         try {
-            const { params, body, user, token } = this._extractRequestData(req);
-            const { db } = params;
-            const { name } = body;
+            const { body, user, token } = this._extractRequestData(req);
+            const { database, namespace, entity, tag } = body;
 
-            if (!name) {
+            if (!database || !namespace || !entity || !tag) {
                 return res.status(400).json({
                     error: true,
-                    message: 'Namespace name is required'
+                    message: 'Database, namespace, entity, and tag are required'
                 });
             }
 
-            const result = await this.service.createNamespace(
-                db,
-                name,
+            const result = await this.service.removeTag(
+                database,
+                namespace,
+                entity,
+                tag,
                 user.permissions,
                 user.email,
                 token
             );
 
-            res.status(201).json({
+            res.json({
                 error: false,
-                message: 'Namespace created successfully',
+                message: 'Tag removed successfully',
                 data: result
             });
 
@@ -128,15 +84,16 @@ class DatabaseController {
     }
 
     /**
-     * List namespaces
+     * List tags
      */
-    async listNamespaces(req, res) {
+    async listTags(req, res) {
         try {
-            const { params, user, token } = this._extractRequestData(req);
-            const { db } = params;
+            const { query, user, token } = this._extractRequestData(req);
+            const { database, pattern } = query;
 
-            const result = await this.service.listNamespaces(
-                db,
+            const result = await this.service.listTags(
+                database,
+                pattern || '*',
                 user.permissions,
                 token
             );
@@ -152,24 +109,56 @@ class DatabaseController {
     }
 
     /**
-     * Drop namespace
+     * Match tags by patterns
      */
-    async dropNamespace(req, res) {
+    async matchTags(req, res) {
         try {
-            const { params, user, token } = this._extractRequestData(req);
-            const { db, name } = params;
+            const { body, query, user, token } = this._extractRequestData(req);
+            const { patterns } = body;
+            const { database } = query;
 
-            const result = await this.service.dropNamespace(
-                db,
-                name,
+            if (!patterns || !Array.isArray(patterns)) {
+                return res.status(400).json({
+                    error: true,
+                    message: 'Patterns array is required'
+                });
+            }
+
+            const result = await this.service.matchTags(
+                patterns,
+                database,
                 user.permissions,
-                user.email,
                 token
             );
 
             res.json({
                 error: false,
-                message: 'Namespace dropped successfully',
+                data: result
+            });
+
+        } catch (error) {
+            this._handleError(error, res);
+        }
+    }
+
+    /**
+     * View tag content
+     */
+    async viewTag(req, res) {
+        try {
+            const { params, query, user, token } = this._extractRequestData(req);
+            const { tag } = params;
+            const { database } = query;
+
+            const result = await this.service.viewTag(
+                tag,
+                database,
+                user.permissions,
+                token
+            );
+
+            res.json({
+                error: false,
                 data: result
             });
 
@@ -205,7 +194,7 @@ class DatabaseController {
      * Handle errors uniformly
      */
     _handleError(error, res) {
-        console.error('Database Controller Error:', error);
+        console.error('Tag Controller Error:', error);
 
         if (error.statusCode) {
             return res.status(error.statusCode).json(error.toJSON());
@@ -218,5 +207,4 @@ class DatabaseController {
     }
 }
 
-module.exports = DatabaseController;
-
+module.exports = TagController;

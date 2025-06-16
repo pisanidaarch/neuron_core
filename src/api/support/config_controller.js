@@ -1,57 +1,24 @@
-// src/api/support/database_controller.js
+// src/api/support/config_controller.js
 
-const DatabaseService = require('../../core/support/database_service');
+const ConfigService = require('../../core/support/config_service');
 const { AuthenticationError } = require('../../cross/entity/errors');
 
 /**
- * Database Controller - HTTP layer for database operations
+ * Config Controller - HTTP layer for AI configuration
  */
-class DatabaseController {
-    constructor() {
-        this.service = new DatabaseService();
+class ConfigController {
+    constructor(aiName) {
+        this.service = new ConfigService(aiName);
     }
 
     /**
-     * Create database
+     * Get AI configuration
      */
-    async createDatabase(req, res) {
-        try {
-            const { body, user, token } = this._extractRequestData(req);
-            const { name } = body;
-
-            if (!name) {
-                return res.status(400).json({
-                    error: true,
-                    message: 'Database name is required'
-                });
-            }
-
-            const result = await this.service.createDatabase(
-                name,
-                user.permissions,
-                user.email,
-                token
-            );
-
-            res.status(201).json({
-                error: false,
-                message: 'Database created successfully',
-                data: result
-            });
-
-        } catch (error) {
-            this._handleError(error, res);
-        }
-    }
-
-    /**
-     * List databases
-     */
-    async listDatabases(req, res) {
+    async getAIConfig(req, res) {
         try {
             const { user, token } = this._extractRequestData(req);
 
-            const result = await this.service.listDatabases(
+            const result = await this.service.getAIConfig(
                 user.permissions,
                 token
             );
@@ -67,15 +34,14 @@ class DatabaseController {
     }
 
     /**
-     * Drop database
+     * Update AI theme
      */
-    async dropDatabase(req, res) {
+    async updateTheme(req, res) {
         try {
-            const { params, user, token } = this._extractRequestData(req);
-            const { name } = params;
+            const { body, user, token } = this._extractRequestData(req);
 
-            const result = await this.service.dropDatabase(
-                name,
+            const result = await this.service.updateTheme(
+                body,
                 user.permissions,
                 user.email,
                 token
@@ -83,7 +49,7 @@ class DatabaseController {
 
             res.json({
                 error: false,
-                message: 'Database dropped successfully',
+                message: 'AI theme updated successfully',
                 data: result
             });
 
@@ -93,32 +59,22 @@ class DatabaseController {
     }
 
     /**
-     * Create namespace
+     * Update AI behavior
      */
-    async createNamespace(req, res) {
+    async updateBehavior(req, res) {
         try {
-            const { params, body, user, token } = this._extractRequestData(req);
-            const { db } = params;
-            const { name } = body;
+            const { body, user, token } = this._extractRequestData(req);
 
-            if (!name) {
-                return res.status(400).json({
-                    error: true,
-                    message: 'Namespace name is required'
-                });
-            }
-
-            const result = await this.service.createNamespace(
-                db,
-                name,
+            const result = await this.service.updateBehavior(
+                body,
                 user.permissions,
                 user.email,
                 token
             );
 
-            res.status(201).json({
+            res.json({
                 error: false,
-                message: 'Namespace created successfully',
+                message: 'AI behavior updated successfully',
                 data: result
             });
 
@@ -128,15 +84,13 @@ class DatabaseController {
     }
 
     /**
-     * List namespaces
+     * Get behavior override
      */
-    async listNamespaces(req, res) {
+    async getBehaviorOverride(req, res) {
         try {
-            const { params, user, token } = this._extractRequestData(req);
-            const { db } = params;
+            const { user, token } = this._extractRequestData(req);
 
-            const result = await this.service.listNamespaces(
-                db,
+            const result = await this.service.getBehaviorOverride(
                 user.permissions,
                 token
             );
@@ -152,16 +106,14 @@ class DatabaseController {
     }
 
     /**
-     * Drop namespace
+     * Set behavior override
      */
-    async dropNamespace(req, res) {
+    async setBehaviorOverride(req, res) {
         try {
-            const { params, user, token } = this._extractRequestData(req);
-            const { db, name } = params;
+            const { body, user, token } = this._extractRequestData(req);
 
-            const result = await this.service.dropNamespace(
-                db,
-                name,
+            const result = await this.service.setBehaviorOverride(
+                body,
                 user.permissions,
                 user.email,
                 token
@@ -169,7 +121,31 @@ class DatabaseController {
 
             res.json({
                 error: false,
-                message: 'Namespace dropped successfully',
+                message: 'Behavior override set successfully',
+                data: result
+            });
+
+        } catch (error) {
+            this._handleError(error, res);
+        }
+    }
+
+    /**
+     * Reset to default configuration
+     */
+    async resetToDefault(req, res) {
+        try {
+            const { user, token } = this._extractRequestData(req);
+
+            const result = await this.service.resetToDefault(
+                user.permissions,
+                user.email,
+                token
+            );
+
+            res.json({
+                error: false,
+                message: 'Configuration reset to default successfully',
                 data: result
             });
 
@@ -205,7 +181,7 @@ class DatabaseController {
      * Handle errors uniformly
      */
     _handleError(error, res) {
-        console.error('Database Controller Error:', error);
+        console.error('Config Controller Error:', error);
 
         if (error.statusCode) {
             return res.status(error.statusCode).json(error.toJSON());
@@ -218,5 +194,4 @@ class DatabaseController {
     }
 }
 
-module.exports = DatabaseController;
-
+module.exports = ConfigController;

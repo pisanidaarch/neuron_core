@@ -1,41 +1,41 @@
-// src/api/support/database_controller.js
+// src/api/support/user_data_controller.js
 
-const DatabaseService = require('../../core/support/database_service');
+const UserDataService = require('../../core/support/user_data_service');
 const { AuthenticationError } = require('../../cross/entity/errors');
 
 /**
- * Database Controller - HTTP layer for database operations
+ * User Data Controller - HTTP layer for user data operations
  */
-class DatabaseController {
-    constructor() {
-        this.service = new DatabaseService();
+class UserDataController {
+    constructor(aiName) {
+        this.service = new UserDataService(aiName);
     }
 
     /**
-     * Create database
+     * Store pointer data
      */
-    async createDatabase(req, res) {
+    async storePointer(req, res) {
         try {
             const { body, user, token } = this._extractRequestData(req);
-            const { name } = body;
+            const { name, content } = body;
 
-            if (!name) {
+            if (!name || !content) {
                 return res.status(400).json({
                     error: true,
-                    message: 'Database name is required'
+                    message: 'Name and content are required'
                 });
             }
 
-            const result = await this.service.createDatabase(
+            const result = await this.service.storePointer(
                 name,
-                user.permissions,
+                content,
                 user.email,
                 token
             );
 
             res.status(201).json({
                 error: false,
-                message: 'Database created successfully',
+                message: 'Pointer stored successfully',
                 data: result
             });
 
@@ -45,80 +45,30 @@ class DatabaseController {
     }
 
     /**
-     * List databases
+     * Store structure data
      */
-    async listDatabases(req, res) {
+    async storeStructure(req, res) {
         try {
-            const { user, token } = this._extractRequestData(req);
+            const { body, user, token } = this._extractRequestData(req);
+            const { name, data } = body;
 
-            const result = await this.service.listDatabases(
-                user.permissions,
-                token
-            );
-
-            res.json({
-                error: false,
-                data: result
-            });
-
-        } catch (error) {
-            this._handleError(error, res);
-        }
-    }
-
-    /**
-     * Drop database
-     */
-    async dropDatabase(req, res) {
-        try {
-            const { params, user, token } = this._extractRequestData(req);
-            const { name } = params;
-
-            const result = await this.service.dropDatabase(
-                name,
-                user.permissions,
-                user.email,
-                token
-            );
-
-            res.json({
-                error: false,
-                message: 'Database dropped successfully',
-                data: result
-            });
-
-        } catch (error) {
-            this._handleError(error, res);
-        }
-    }
-
-    /**
-     * Create namespace
-     */
-    async createNamespace(req, res) {
-        try {
-            const { params, body, user, token } = this._extractRequestData(req);
-            const { db } = params;
-            const { name } = body;
-
-            if (!name) {
+            if (!name || !data) {
                 return res.status(400).json({
                     error: true,
-                    message: 'Namespace name is required'
+                    message: 'Name and data are required'
                 });
             }
 
-            const result = await this.service.createNamespace(
-                db,
+            const result = await this.service.storeStructure(
                 name,
-                user.permissions,
+                data,
                 user.email,
                 token
             );
 
             res.status(201).json({
                 error: false,
-                message: 'Namespace created successfully',
+                message: 'Structure stored successfully',
                 data: result
             });
 
@@ -128,21 +78,30 @@ class DatabaseController {
     }
 
     /**
-     * List namespaces
+     * Store enum data
      */
-    async listNamespaces(req, res) {
+    async storeEnum(req, res) {
         try {
-            const { params, user, token } = this._extractRequestData(req);
-            const { db } = params;
+            const { body, user, token } = this._extractRequestData(req);
+            const { name, values } = body;
 
-            const result = await this.service.listNamespaces(
-                db,
-                user.permissions,
+            if (!name || !values) {
+                return res.status(400).json({
+                    error: true,
+                    message: 'Name and values are required'
+                });
+            }
+
+            const result = await this.service.storeEnum(
+                name,
+                values,
+                user.email,
                 token
             );
 
-            res.json({
+            res.status(201).json({
                 error: false,
+                message: 'Enum stored successfully',
                 data: result
             });
 
@@ -152,24 +111,73 @@ class DatabaseController {
     }
 
     /**
-     * Drop namespace
+     * Get user data
      */
-    async dropNamespace(req, res) {
+    async getUserData(req, res) {
         try {
             const { params, user, token } = this._extractRequestData(req);
-            const { db, name } = params;
+            const { type, name } = params;
 
-            const result = await this.service.dropNamespace(
-                db,
+            const result = await this.service.getUserData(
+                type,
                 name,
-                user.permissions,
                 user.email,
                 token
             );
 
             res.json({
                 error: false,
-                message: 'Namespace dropped successfully',
+                data: result
+            });
+
+        } catch (error) {
+            this._handleError(error, res);
+        }
+    }
+
+    /**
+     * List user data
+     */
+    async listUserData(req, res) {
+        try {
+            const { query, user, token } = this._extractRequestData(req);
+            const { type, pattern } = query;
+
+            const result = await this.service.listUserData(
+                type,
+                pattern,
+                user.email,
+                token
+            );
+
+            res.json({
+                error: false,
+                data: result
+            });
+
+        } catch (error) {
+            this._handleError(error, res);
+        }
+    }
+
+    /**
+     * Delete user data
+     */
+    async deleteUserData(req, res) {
+        try {
+            const { params, user, token } = this._extractRequestData(req);
+            const { type, name } = params;
+
+            const result = await this.service.deleteUserData(
+                type,
+                name,
+                user.email,
+                token
+            );
+
+            res.json({
+                error: false,
+                message: 'User data deleted successfully',
                 data: result
             });
 
@@ -205,7 +213,7 @@ class DatabaseController {
      * Handle errors uniformly
      */
     _handleError(error, res) {
-        console.error('Database Controller Error:', error);
+        console.error('User Data Controller Error:', error);
 
         if (error.statusCode) {
             return res.status(error.statusCode).json(error.toJSON());
@@ -218,5 +226,4 @@ class DatabaseController {
     }
 }
 
-module.exports = DatabaseController;
-
+module.exports = UserDataController;

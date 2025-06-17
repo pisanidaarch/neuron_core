@@ -14,7 +14,7 @@ class GroupSNL extends BaseSNL {
     }
 
     /**
-     * Get group by name - CORRECTED: no values() in view
+     * Get group by name
      */
     getGroupSNL(groupName) {
         const path = this.buildPath(this.database, this.namespace, this.entity, groupName);
@@ -22,7 +22,7 @@ class GroupSNL extends BaseSNL {
     }
 
     /**
-     * Create or update group
+     * Set group (create or update)
      */
     setGroupSNL(groupName, groupData) {
         const path = this.buildPath(this.database, this.namespace, this.entity);
@@ -55,6 +55,14 @@ class GroupSNL extends BaseSNL {
     }
 
     /**
+     * Drop all groups entity
+     */
+    dropGroupsEntitySNL() {
+        const path = this.buildPath(this.database, this.namespace, this.entity);
+        return this.buildSNL('drop', 'structure', null, path);
+    }
+
+    /**
      * Tag a group
      */
     tagGroupSNL(groupName, tagName) {
@@ -68,6 +76,15 @@ class GroupSNL extends BaseSNL {
     untagGroupSNL(groupName, tagName) {
         const path = this.buildPath(this.database, this.namespace, this.entity, groupName);
         return this.buildSNL('untag', 'structure', tagName, path);
+    }
+
+    /**
+     * Match groups by tags
+     */
+    matchGroupsByTagSNL(tags) {
+        const path = this.buildPath(this.database, this.namespace);
+        const tagList = Array.isArray(tags) ? tags.join(',') : tags;
+        return this.buildSNL('match', 'tag', tagList, path);
     }
 
     /**
@@ -108,45 +125,31 @@ class GroupSNL extends BaseSNL {
     }
 
     /**
-     * Validate group data structure
+     * Validate group name
      */
-    validateGroupData(groupData) {
-        if (!groupData || typeof groupData !== 'object') {
-            throw new Error('Group data must be an object');
+    validateGroupName(groupName) {
+        if (!groupName || typeof groupName !== 'string' || groupName.trim().length === 0) {
+            throw new Error('Group name is required');
         }
 
-        // Groups can have custom fields, but validate basic structure
-        if (groupData.permissions && !Array.isArray(groupData.permissions)) {
-            throw new Error('Group permissions must be an array');
-        }
-
-        if (groupData.description && typeof groupData.description !== 'string') {
-            throw new Error('Group description must be a string');
+        // Group names should follow specific format
+        if (!/^[a-zA-Z0-9_-]+$/.test(groupName)) {
+            throw new Error('Group name can only contain letters, numbers, dashes, and underscores');
         }
 
         return true;
     }
 
     /**
-     * Default group structures
+     * Build group data structure
      */
-    getDefaultGroups() {
+    buildGroupData(permissions = [], description = '', isSystem = false) {
         return {
-            subscription_admin: {
-                description: 'Subscription administrators',
-                permissions: ['subscription_management'],
-                system: true
-            },
-            admin: {
-                description: 'System administrators',
-                permissions: ['user_management', 'system_config'],
-                system: true
-            },
-            default: {
-                description: 'Default user group',
-                permissions: ['basic_access'],
-                system: true
-            }
+            permissions: permissions,
+            description: description,
+            isSystem: isSystem,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
         };
     }
 }

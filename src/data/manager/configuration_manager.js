@@ -26,22 +26,21 @@ class ConfigurationManager {
 
             const exists = this.snl.parseStructureExistsResponse(checkResponse);
             if (!exists) {
-                const createCommand = this.snl.createConfigStructureSNL();
-                await this.sender.executeSNL(createCommand, this.aiToken);
-                console.log('✅ Configuration structure created');
+                console.log('Configuration structure does not exist yet');
+                // Note: We cannot create the structure itself in SNL, only set entities
             }
         } catch (error) {
-            console.error('Failed to initialize configuration structure:', error);
+            console.error('Failed to check configuration structure:', error);
             throw error;
         }
     }
 
     /**
-     * Save configuration
+     * Set configuration (create or update)
      * @param {Configuration} config - Configuration entity
      * @returns {Promise<Configuration>}
      */
-    async saveConfiguration(config) {
+    async setConfiguration(config) {
         try {
             const validation = config.validate();
             if (!validation.valid) {
@@ -53,22 +52,21 @@ class ConfigurationManager {
             const command = this.snl.setConfigSNL(config.id, configData);
             await this.sender.executeSNL(command, this.aiToken);
 
-            console.log(`✅ Configuration saved: ${config.id}`);
+            console.log(`✅ Configuration set: ${config.id}`);
             return config;
         } catch (error) {
-            console.error('Failed to save configuration:', error);
+            console.error('Failed to set configuration:', error);
             throw error;
         }
     }
 
     /**
-     * Get configuration by AI name
-     * @param {string} aiName - AI name
+     * Get configuration by ID
+     * @param {string} configId - Configuration ID
      * @returns {Promise<Configuration|null>}
      */
-    async getConfiguration(aiName) {
+    async getConfiguration(configId) {
         try {
-            const configId = `config_${aiName}`;
             const command = this.snl.getConfigSNL(configId);
             const response = await this.sender.executeSNL(command, this.aiToken);
 
@@ -85,205 +83,31 @@ class ConfigurationManager {
     }
 
     /**
-     * Get or create default configuration
-     * @param {string} aiName - AI name
-     * @returns {Promise<Configuration>}
-     */
-    async getOrCreateConfiguration(aiName) {
-        try {
-            let config = await this.getConfiguration(aiName);
-
-            if (!config) {
-                config = Configuration.createDefault(aiName);
-                await this.saveConfiguration(config);
-            }
-
-            return config;
-        } catch (error) {
-            console.error('Failed to get or create configuration:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Update configuration colors
-     * @param {string} aiName - AI name
-     * @param {Object} colors - New colors
-     * @param {string} updatedBy - User who updated
-     * @returns {Promise<Configuration>}
-     */
-    async updateColors(aiName, colors, updatedBy) {
-        try {
-            const config = await this.getOrCreateConfiguration(aiName);
-            config.updateColors(colors);
-            config.updatedBy = updatedBy;
-
-            return await this.saveConfiguration(config);
-        } catch (error) {
-            console.error('Failed to update colors:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Update configuration logo
-     * @param {string} aiName - AI name
-     * @param {Object} logo - New logo data
-     * @param {string} updatedBy - User who updated
-     * @returns {Promise<Configuration>}
-     */
-    async updateLogo(aiName, logo, updatedBy) {
-        try {
-            const config = await this.getOrCreateConfiguration(aiName);
-            config.updateLogo(logo);
-            config.updatedBy = updatedBy;
-
-            return await this.saveConfiguration(config);
-        } catch (error) {
-            console.error('Failed to update logo:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Update configuration behavior
-     * @param {string} aiName - AI name
-     * @param {string} behavior - New behavior
-     * @param {string} updatedBy - User who updated
-     * @returns {Promise<Configuration>}
-     */
-    async updateBehavior(aiName, behavior, updatedBy) {
-        try {
-            const config = await this.getOrCreateConfiguration(aiName);
-            config.updateBehavior(behavior);
-            config.updatedBy = updatedBy;
-
-            return await this.saveConfiguration(config);
-        } catch (error) {
-            console.error('Failed to update behavior:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Update UI settings
-     * @param {string} aiName - AI name
-     * @param {Object} uiSettings - New UI settings
-     * @param {string} updatedBy - User who updated
-     * @returns {Promise<Configuration>}
-     */
-    async updateUISettings(aiName, uiSettings, updatedBy) {
-        try {
-            const config = await this.getOrCreateConfiguration(aiName);
-            config.updateUI(uiSettings);
-            config.updatedBy = updatedBy;
-
-            return await this.saveConfiguration(config);
-        } catch (error) {
-            console.error('Failed to update UI settings:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Update feature flags
-     * @param {string} aiName - AI name
-     * @param {Object} features - New feature flags
-     * @param {string} updatedBy - User who updated
-     * @returns {Promise<Configuration>}
-     */
-    async updateFeatures(aiName, features, updatedBy) {
-        try {
-            const config = await this.getOrCreateConfiguration(aiName);
-            config.updateFeatures(features);
-            config.updatedBy = updatedBy;
-
-            return await this.saveConfiguration(config);
-        } catch (error) {
-            console.error('Failed to update features:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Update limits
-     * @param {string} aiName - AI name
-     * @param {Object} limits - New limits
-     * @param {string} updatedBy - User who updated
-     * @returns {Promise<Configuration>}
-     */
-    async updateLimits(aiName, limits, updatedBy) {
-        try {
-            const config = await this.getOrCreateConfiguration(aiName);
-            config.updateLimits(limits);
-            config.updatedBy = updatedBy;
-
-            return await this.saveConfiguration(config);
-        } catch (error) {
-            console.error('Failed to update limits:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Update integrations
-     * @param {string} aiName - AI name
-     * @param {Object} integrations - New integration settings
-     * @param {string} updatedBy - User who updated
-     * @returns {Promise<Configuration>}
-     */
-    async updateIntegrations(aiName, integrations, updatedBy) {
-        try {
-            const config = await this.getOrCreateConfiguration(aiName);
-            config.updateIntegrations(integrations);
-            config.updatedBy = updatedBy;
-
-            return await this.saveConfiguration(config);
-        } catch (error) {
-            console.error('Failed to update integrations:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Delete configuration
-     * @param {string} aiName - AI name
-     * @returns {Promise<boolean>}
-     */
-    async deleteConfiguration(aiName) {
-        try {
-            const configId = `config_${aiName}`;
-            const command = this.snl.removeConfigSNL(configId);
-            await this.sender.executeSNL(command, this.aiToken);
-
-            console.log(`✅ Configuration deleted: ${configId}`);
-            return true;
-        } catch (error) {
-            console.error('Failed to delete configuration:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * List all configurations
+     * List configurations
+     * @param {Object} options - List options
      * @returns {Promise<Configuration[]>}
      */
-    async listConfigurations() {
+    async listConfigurations(options = {}) {
         try {
-            const command = this.snl.listConfigsSNL();
+            const { pattern = '*', page = 1, limit = 20 } = options;
+
+            const command = this.snl.listConfigsSNL(pattern);
             const response = await this.sender.executeSNL(command, this.aiToken);
 
             const configIds = this.snl.parseConfigsList(response);
             const configurations = [];
 
             for (const configId of configIds) {
-                const config = await this.getConfiguration(configId.replace('config_', ''));
+                const config = await this.getConfiguration(configId);
                 if (config) {
                     configurations.push(config);
                 }
             }
 
-            return configurations;
+            // Apply pagination
+            const startIndex = (page - 1) * limit;
+            const endIndex = startIndex + limit;
+            return configurations.slice(startIndex, endIndex);
         } catch (error) {
             console.error('Failed to list configurations:', error);
             throw error;
@@ -291,46 +115,193 @@ class ConfigurationManager {
     }
 
     /**
-     * Reset configuration to default
-     * @param {string} aiName - AI name
-     * @returns {Promise<Configuration>}
+     * Search configurations
+     * @param {string} searchTerm - Search term
+     * @returns {Promise<Configuration[]>}
      */
-    async resetToDefault(aiName) {
+    async searchConfigurations(searchTerm) {
         try {
-            const defaultConfig = Configuration.createDefault(aiName);
-            return await this.saveConfiguration(defaultConfig);
+            const command = this.snl.searchConfigsSNL(searchTerm);
+            const response = await this.sender.executeSNL(command, this.aiToken);
+
+            const configIds = this.snl.parseConfigsList(response);
+            const configurations = [];
+
+            for (const configId of configIds) {
+                const config = await this.getConfiguration(configId);
+                if (config) {
+                    configurations.push(config);
+                }
+            }
+
+            return configurations;
         } catch (error) {
-            console.error('Failed to reset configuration to default:', error);
+            console.error('Failed to search configurations:', error);
             throw error;
         }
     }
 
     /**
-     * Get CSS variables for colors
-     * @param {string} aiName - AI name
-     * @returns {Promise<Object>}
+     * Remove configuration
+     * @param {string} configId - Configuration ID
+     * @returns {Promise<boolean>}
      */
-    async getCSSVariables(aiName) {
+    async removeConfiguration(configId) {
         try {
-            const config = await this.getOrCreateConfiguration(aiName);
-            return config.getCSSVariables();
+            // Check if configuration exists first
+            const existingConfig = await this.getConfiguration(configId);
+            if (!existingConfig) {
+                throw new NotFoundError(`Configuration not found: ${configId}`);
+            }
+
+            // Prevent removal of system configurations
+            if (existingConfig.isSystem) {
+                throw new ValidationError(`Cannot remove system configuration: ${configId}`);
+            }
+
+            const command = this.snl.removeConfigSNL(configId);
+            await this.sender.executeSNL(command, this.aiToken);
+
+            console.log(`✅ Configuration removed: ${configId}`);
+            return true;
         } catch (error) {
-            console.error('Failed to get CSS variables:', error);
+            console.error('Failed to remove configuration:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Drop all configurations (delete entire entity)
+     * @returns {Promise<boolean>}
+     */
+    async dropAllConfigurations() {
+        try {
+            const command = this.snl.dropConfigsEntitySNL();
+            await this.sender.executeSNL(command, this.aiToken);
+
+            console.log(`✅ All configurations dropped`);
+            return true;
+        } catch (error) {
+            console.error('Failed to drop configurations:', error);
             throw error;
         }
     }
 
     /**
      * Check if configuration exists
-     * @param {string} aiName - AI name
+     * @param {string} configId - Configuration ID
      * @returns {Promise<boolean>}
      */
-    async configurationExists(aiName) {
+    async configurationExists(configId) {
         try {
-            const config = await this.getConfiguration(aiName);
+            const config = await this.getConfiguration(configId);
             return config !== null;
         } catch (error) {
             return false;
+        }
+    }
+
+    /**
+     * Tag configuration
+     * @param {string} configId - Configuration ID
+     * @param {string} tagName - Tag name
+     * @returns {Promise<boolean>}
+     */
+    async tagConfiguration(configId, tagName) {
+        try {
+            // Check if configuration exists
+            const exists = await this.configurationExists(configId);
+            if (!exists) {
+                throw new NotFoundError(`Configuration not found: ${configId}`);
+            }
+
+            const command = this.snl.tagConfigSNL(configId, tagName);
+            await this.sender.executeSNL(command, this.aiToken);
+
+            console.log(`✅ Configuration tagged: ${configId} with ${tagName}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to tag configuration:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Untag configuration
+     * @param {string} configId - Configuration ID
+     * @param {string} tagName - Tag name
+     * @returns {Promise<boolean>}
+     */
+    async untagConfiguration(configId, tagName) {
+        try {
+            // Check if configuration exists
+            const exists = await this.configurationExists(configId);
+            if (!exists) {
+                throw new NotFoundError(`Configuration not found: ${configId}`);
+            }
+
+            const command = this.snl.untagConfigSNL(configId, tagName);
+            await this.sender.executeSNL(command, this.aiToken);
+
+            console.log(`✅ Configuration untagged: ${configId} removed ${tagName}`);
+            return true;
+        } catch (error) {
+            console.error('Failed to untag configuration:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get configurations by tags
+     * @param {string[]} tags - Tags to match
+     * @returns {Promise<Configuration[]>}
+     */
+    async getConfigurationsByTags(tags) {
+        try {
+            const command = this.snl.matchConfigsByTagSNL(tags);
+            const response = await this.sender.executeSNL(command, this.aiToken);
+
+            const configIds = this.snl.parseConfigsList(response);
+            const configurations = [];
+
+            for (const configId of configIds) {
+                const config = await this.getConfiguration(configId);
+                if (config) {
+                    configurations.push(config);
+                }
+            }
+
+            return configurations;
+        } catch (error) {
+            console.error('Failed to get configurations by tags:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Set default configuration
+     * @param {Configuration} config - Configuration to set as default
+     * @returns {Promise<Configuration>}
+     */
+    async setDefaultConfiguration(config) {
+        try {
+            // Remove default tag from all configurations
+            const allConfigs = await this.listConfigurations();
+            for (const cfg of allConfigs) {
+                if (cfg.isDefault) {
+                    await this.untagConfiguration(cfg.id, 'default');
+                }
+            }
+
+            // Set this configuration as default
+            config.isDefault = true;
+            await this.setConfiguration(config);
+            await this.tagConfiguration(config.id, 'default');
+
+            return config;
+        } catch (error) {
+            console.error('Failed to set default configuration:', error);
+            throw error;
         }
     }
 }

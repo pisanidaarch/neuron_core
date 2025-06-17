@@ -26,9 +26,9 @@ class CommandService {
     }
 
     /**
-     * Create new command
+     * Set command (create or update)
      */
-    async createCommand(commandData, userPermissions, userEmail, token) {
+    async setCommand(commandData, userPermissions, userEmail, token) {
         try {
             // Create appropriate command type
             const command = this._createCommandByType(commandData);
@@ -36,16 +36,18 @@ class CommandService {
             // Determine storage location
             const { database, namespace } = this._determineStorageLocation(commandData, userPermissions, userEmail);
 
-            // Validate user can create commands in this location
-            await this._validateCreatePermission(database, namespace, userPermissions, userEmail);
+            // Validate user can set commands in this location
+            await this._validateWritePermission(database, namespace, userPermissions, userEmail);
 
             // Set metadata
             command.createdBy = userEmail;
-            command.createdAt = new Date().toISOString();
+            if (!command.createdAt) {
+                command.createdAt = new Date().toISOString();
+            }
             command.updatedAt = new Date().toISOString();
 
-            // Create command
-            const result = await this.manager.createCommand(command, database, namespace, token);
+            // Set command
+            const result = await this.manager.setCommand(command, database, namespace, token);
 
             return {
                 ...result,
@@ -60,7 +62,7 @@ class CommandService {
     }
 
     /**
-     * Get command by ID
+     * Get command
      */
     async getCommand(commandId, searchLocation, userPermissions, userEmail, token) {
         try {
@@ -70,6 +72,9 @@ class CommandService {
                 try {
                     const command = await this.manager.getCommand(commandId, location.database, location.namespace, token);
                     if (command) {
+                        // Validate user can read this command
+                        await this._validateReadPermission(location.database, location.namespace, userPermissions, userEmail);
+
                         return {
                             command,
                             location
@@ -77,7 +82,7 @@ class CommandService {
                     }
                 } catch (error) {
                     // Continue searching in other locations
-                    console.warn(`Command not found in ${location.database}.${location.namespace}`);
+                    console.debug(`Command not found in ${location.database}.${location.namespace}`);
                 }
             }
 
@@ -89,32 +94,7 @@ class CommandService {
     }
 
     /**
-     * List commands
-     */
-    async listCommands(location, pattern, userPermissions, userEmail, token) {
-        try {
-            // If no location specified, search in user's data first
-            if (!location) {
-                location = this._getUserDataLocation(userEmail);
-            }
-
-            // Validate user can access this location
-            await this._validateReadPermission(location.database, location.namespace, userPermissions, userEmail);
-
-            const commandIds = await this.manager.listCommands(location.database, location.namespace, token, pattern);
-
-            return {
-                commands: commandIds,
-                location
-            };
-
-        } catch (error) {
-            throw error;
-        }
-    }
-
-    /**
-     * Update command
+     * Update command (uses set internally)
      */
     async updateCommand(commandId, updateData, searchLocation, userPermissions, userEmail, token) {
         try {
@@ -124,15 +104,13 @@ class CommandService {
                 throw new Error(`Command not found: ${commandId}`);
             }
 
-            // Validate user can modify this command
-            await this._validateWritePermission(existing.location.database, existing.location.namespace, userPermissions, userEmail);
-
-            // Update command data
+            // Merge update data
             const updatedCommand = this._updateCommandData(existing.command, updateData);
             updatedCommand.updatedBy = userEmail;
             updatedCommand.updatedAt = new Date().toISOString();
 
-            const result = await this.manager.updateCommand(updatedCommand, existing.location.database, existing.location.namespace, token);
+            // Use setCommand to update
+            const result = await this.manager.setCommand(updatedCommand, existing.location.database, existing.location.namespace, token);
 
             return {
                 ...result,
@@ -146,9 +124,9 @@ class CommandService {
     }
 
     /**
-     * Delete command
+     * Remove command
      */
-    async deleteCommand(commandId, searchLocation, userPermissions, userEmail, token) {
+    async removeCommand(commandId, searchLocation, userPermissions, userEmail, token) {
         try {
             // Find existing command
             const existing = await this.getCommand(commandId, searchLocation, userPermissions, userEmail, token);
@@ -156,10 +134,10 @@ class CommandService {
                 throw new Error(`Command not found: ${commandId}`);
             }
 
-            // Validate user can delete this command
+            // Validate user can remove this command
             await this._validateWritePermission(existing.location.database, existing.location.namespace, userPermissions, userEmail);
 
-            const result = await this.manager.deleteCommand(commandId, existing.location.database, existing.location.namespace, token);
+            const result = await this.manager.removeCommand(commandId, existing.location.database, existing.location.namespace, token);
 
             return {
                 ...result,
@@ -201,120 +179,140 @@ class CommandService {
     }
 
     /**
+     * List commands
+     */
+    async listCommands(location, pattern, userPermissions, userEmail, token) {
+        try {
+            const locations = location ? [location] : this._getSearchLocations(userPermissions, userEmail);
+            const results = [];
+
+            for (const loc of locations) {
+                try {
+                    // Validate read permission
+                    await this._validateReadPermission(loc.database, loc.namespace, userPermissions, userEmail);
+
+                    const commands = await this.manager.listCommands({
+                        database: loc.database,
+                        namespace: loc.namespace,
+                        pattern
+                    }, token);
+
+                    if (commands && commands.length > 0) {
+                        results.push({
+                            location: loc,
+                            commands
+                        });
+                    }
+                } catch (error) {
+                    console.warn(`List failed in ${loc.database}.${loc.namespace}:`, error.message);
+                }
+            }
+
+            return results;
+
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    /**
      * Create command by type
+     * @private
      */
     _createCommandByType(commandData) {
-        const commandClasses = {
-            'root': RootCommand,
-            'frontend': FrontendCommand,
-            'database': DatabaseCommand,
-            'script': ScriptCommand,
-            'ai': AICommand,
-            'if': IfCommand,
-            'timer': TimerCommand,
-            'goto': GoToCommand,
-            'alert': AlertCommand
-        };
+        const { commandType } = commandData;
 
-        const CommandClass = commandClasses[commandData.commandType] || Command;
-        return new CommandClass(commandData);
+        switch (commandType) {
+            case 'root':
+                return new RootCommand(commandData);
+            case 'frontend':
+                return new FrontendCommand(commandData);
+            case 'database':
+                return new DatabaseCommand(commandData);
+            case 'script':
+                return new ScriptCommand(commandData);
+            case 'ai':
+                return new AICommand(commandData);
+            case 'if':
+                return new IfCommand(commandData);
+            case 'timer':
+                return new TimerCommand(commandData);
+            case 'goto':
+                return new GoToCommand(commandData);
+            case 'alert':
+                return new AlertCommand(commandData);
+            default:
+                return new Command(commandData);
+        }
     }
 
     /**
      * Determine storage location for command
+     * @private
      */
     _determineStorageLocation(commandData, userPermissions, userEmail) {
-        // If user specifies a location and has permission, use it
+        // If explicitly specified
         if (commandData.database && commandData.namespace) {
-            const hasPermission = userPermissions.some(p =>
-                p.database === commandData.database && p.level >= 2
-            );
-
-            if (hasPermission) {
-                return {
-                    database: commandData.database,
-                    namespace: commandData.namespace
-                };
-            }
+            return {
+                database: commandData.database,
+                namespace: commandData.namespace
+            };
         }
 
-        // Default to user's data area
-        return this._getUserDataLocation(userEmail);
-    }
-
-    /**
-     * Get user data location
-     */
-    _getUserDataLocation(userEmail) {
-        const namespace = userEmail.replace(/\./g, '_').replace('@', '_at_');
+        // Default to user's personal space
+        const userNamespace = this._formatEmailForNamespace(userEmail);
         return {
             database: 'user-data',
-            namespace: namespace
+            namespace: userNamespace
         };
     }
 
     /**
-     * Get search locations for commands
+     * Get search locations based on permissions
+     * @private
      */
     _getSearchLocations(userPermissions, userEmail) {
         const locations = [];
 
-        // Add user's data first
-        locations.push(this._getUserDataLocation(userEmail));
+        // Always include user's personal space
+        const userNamespace = this._formatEmailForNamespace(userEmail);
+        locations.push({
+            database: 'user-data',
+            namespace: userNamespace
+        });
 
-        // Add databases user has permission to access (excluding main, timeline)
-        const excludeDatabases = ['main', 'timeline', 'user-data'];
-        userPermissions.forEach(permission => {
-            if (!excludeDatabases.includes(permission.database) && permission.level >= 1) {
-                // Would need to get namespaces from database - simplified for now
+        // Add locations from permissions
+        userPermissions.forEach(perm => {
+            if (perm.database && perm.level >= 1) { // Read permission
                 locations.push({
-                    database: permission.database,
-                    namespace: '*' // Will need to expand this
+                    database: perm.database,
+                    namespace: perm.namespace || 'default'
                 });
             }
         });
-
-        // Add global database last
-        const hasGlobalAccess = userPermissions.some(p => p.database === 'global');
-        if (hasGlobalAccess) {
-            locations.push({
-                database: 'global',
-                namespace: 'commands'
-            });
-        }
 
         return locations;
     }
 
     /**
-     * Update command data preserving type-specific fields
-     */
-    _updateCommandData(existingCommand, updateData) {
-        const updated = { ...existingCommand.toJSON(), ...updateData };
-        return this._createCommandByType(updated);
-    }
-
-    /**
-     * Validate create permission
-     */
-    async _validateCreatePermission(database, namespace, userPermissions, userEmail) {
-        return this._validateWritePermission(database, namespace, userPermissions, userEmail);
-    }
-
-    /**
      * Validate read permission
+     * @private
      */
     async _validateReadPermission(database, namespace, userPermissions, userEmail) {
-        // User always has access to their own data
-        const userDataNamespace = userEmail.replace(/\./g, '_').replace('@', '_at_');
-        if (database === 'user-data' && namespace === userDataNamespace) {
+        // User always has read access to their own space
+        const userNamespace = this._formatEmailForNamespace(userEmail);
+        if (database === 'user-data' && namespace === userNamespace) {
             return true;
         }
 
         // Check permissions
-        const permission = userPermissions.find(p => p.database === database);
+        const permission = userPermissions.find(p =>
+            p.database === database &&
+            (!p.namespace || p.namespace === namespace)
+        );
+
         if (!permission || permission.level < 1) {
-            throw new AuthorizationError(`Insufficient permissions to read from ${database}`);
+            throw new AuthorizationError(`No read permission for ${database}.${namespace}`);
         }
 
         return true;
@@ -322,23 +320,51 @@ class CommandService {
 
     /**
      * Validate write permission
+     * @private
      */
     async _validateWritePermission(database, namespace, userPermissions, userEmail) {
-        // User always has write access to their own data
-        const userDataNamespace = userEmail.replace(/\./g, '_').replace('@', '_at_');
-        if (database === 'user-data' && namespace === userDataNamespace) {
+        // User always has write access to their own space
+        const userNamespace = this._formatEmailForNamespace(userEmail);
+        if (database === 'user-data' && namespace === userNamespace) {
             return true;
         }
 
         // Check permissions
-        const permission = userPermissions.find(p => p.database === database);
+        const permission = userPermissions.find(p =>
+            p.database === database &&
+            (!p.namespace || p.namespace === namespace)
+        );
+
         if (!permission || permission.level < 2) {
-            throw new AuthorizationError(`Insufficient permissions to write to ${database}`);
+            throw new AuthorizationError(`No write permission for ${database}.${namespace}`);
         }
 
         return true;
     }
+
+    /**
+     * Update command data
+     * @private
+     */
+    _updateCommandData(existingCommand, updateData) {
+        const updated = { ...existingCommand.toObject(), ...updateData };
+
+        // Preserve original metadata
+        updated.id = existingCommand.id;
+        updated.createdAt = existingCommand.createdAt;
+        updated.createdBy = existingCommand.createdBy;
+        updated.commandType = existingCommand.commandType;
+
+        return this._createCommandByType(updated);
+    }
+
+    /**
+     * Format email for namespace
+     * @private
+     */
+    _formatEmailForNamespace(email) {
+        return email.replace(/\./g, '_').replace('@', '_at_');
+    }
 }
 
 module.exports = CommandService;
-

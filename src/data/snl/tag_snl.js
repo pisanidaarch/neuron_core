@@ -1,104 +1,112 @@
 // src/data/snl/tag_snl.js
 
+const BaseSNL = require('./base_snl');
+
 /**
  * Tag SNL - SNL operations for tag management
+ * Tags are not entities themselves but operations on entities
  */
-class TagSNL {
+class TagSNL extends BaseSNL {
     constructor() {
-        // Tag operations
+        super();
     }
 
     /**
-     * Add tag SNL
+     * Add tag to entity
      */
     addTagSNL(database, namespace, entity, tag) {
-        return `tag(structure)\nvalues("${tag}")\non(${database}.${namespace}.${entity})`;
+        const path = this.buildPath(database, namespace, entity);
+        return this.buildSNL('tag', 'structure', tag, path);
     }
 
     /**
-     * Remove tag SNL
+     * Remove tag from entity
      */
     removeTagSNL(database, namespace, entity, tag) {
-        return `untag(structure)\nvalues("${tag}")\non(${database}.${namespace}.${entity})`;
+        const path = this.buildPath(database, namespace, entity);
+        return this.buildSNL('untag', 'structure', tag, path);
     }
 
     /**
-     * List all tags SNL
+     * Match entities by tag patterns
+     * This is the correct way to search for tagged entities
      */
-    listTagsSNL(database = null, pattern = '*') {
-        if (database) {
-            return `list(tag)\nvalues("${pattern}")\non(${database})`;
-        }
-        return `list(tag)\nvalues("${pattern}")\non()`;
+    matchByTagsSNL(patterns, database = null, namespace = null) {
+        const path = database ?
+            (namespace ? this.buildPath(database, namespace) : database) :
+            '';
+
+        const patternStr = Array.isArray(patterns) ? patterns.join(',') : patterns;
+        return this.buildSNL('match', 'tag', patternStr, path);
     }
 
     /**
-     * Match tags by pattern SNL
+     * Search for entities containing specific content
+     * This searches the content, not tags specifically
      */
-    matchTagsSNL(database = null, patterns = []) {
-        const patternStr = patterns.join(',');
-        if (database) {
-            return `match(tag)\nvalues("${patternStr}")\non(${database})`;
-        }
-        return `match(tag)\nvalues("${patternStr}")\non()`;
+    searchEntitiesSNL(searchTerm, entityType, database = null, namespace = null) {
+        this.validateEntityType(entityType);
+
+        const path = database ?
+            (namespace ? this.buildPath(database, namespace) : database) :
+            '';
+
+        return this.buildSNL('search', entityType, searchTerm, path);
     }
 
     /**
-     * View tag content SNL
+     * List entities of a specific type
+     * This lists entities, not tags
      */
-    viewTagSNL(tag, database = null) {
-        if (database) {
-            return `view(tag)\nvalues("${tag}")\non(${database})`;
-        }
-        return `view(tag)\nvalues("${tag}")\non()`;
-    }
+    listEntitiesSNL(entityType, pattern = '*', database = null, namespace = null) {
+        this.validateEntityType(entityType);
 
-    /**
-     * Check entity type for tagging
-     */
-    getEntityTypeSNL(database, namespace, entity) {
-        return `list(structure)\nvalues("${entity}")\non(${database}.${namespace})`;
-    }
+        const path = database ?
+            (namespace ? this.buildPath(database, namespace) : database) :
+            '';
 
-    /**
-     * Parse tags list response
-     */
-    parseTagsList(response) {
-        if (!response || !Array.isArray(response)) {
-            return [];
-        }
-
-        return response;
-    }
-
-    /**
-     * Parse tag view response
-     */
-    parseTagView(response) {
-        if (!response || typeof response !== 'object') {
-            return [];
-        }
-
-        const entities = [];
-        for (const [path, data] of Object.entries(response)) {
-            entities.push({
-                path,
-                data
-            });
-        }
-
-        return entities;
+        return this.buildSNL('list', entityType, pattern, path);
     }
 
     /**
      * Parse match tags response
+     * Returns array of paths that match the tag patterns
      */
-    parseMatchTags(response) {
+    parseMatchTagsResponse(response) {
         if (!response || !Array.isArray(response)) {
             return [];
         }
 
-        return response;
+        return response.map(path => {
+            const parts = path.split('.');
+            return {
+                fullPath: path,
+                database: parts[0] || null,
+                namespace: parts[1] || null,
+                entity: parts[2] || null
+            };
+        });
+    }
+
+    /**
+     * Parse search/list response
+     */
+    parseEntityListResponse(response) {
+        if (!response) {
+            return [];
+        }
+
+        // If response is array, return as is
+        if (Array.isArray(response)) {
+            return response;
+        }
+
+        // If response is object, extract keys
+        if (typeof response === 'object') {
+            return Object.keys(response);
+        }
+
+        return [];
     }
 
     /**
@@ -114,7 +122,38 @@ class TagSNL {
             throw new Error('Tag name can only contain letters, numbers, dashes, and underscores');
         }
 
+        if (tag.length > 50) {
+            throw new Error('Tag name must be 50 characters or less');
+        }
+
         return true;
+    }
+
+    /**
+     * Build tag operation response
+     */
+    buildTagOperationResponse(operation, entity, tag, success = true) {
+        return {
+            operation: operation,
+            entity: entity,
+            tag: tag,
+            success: success,
+            timestamp: new Date().toISOString()
+        };
+    }
+
+    /**
+     * Helper to format multiple tags for match operation
+     */
+    formatTagsForMatch(tags) {
+        if (!Array.isArray(tags) || tags.length === 0) {
+            throw new Error('At least one tag is required for match operation');
+        }
+
+        // Validate each tag
+        tags.forEach(tag => this.validateTagName(tag));
+
+        return tags.join(',');
     }
 }
 

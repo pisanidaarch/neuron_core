@@ -348,11 +348,11 @@ class TagController {
 
             let viewTagSNL;
             if (database && namespace) {
-                viewTagSNL = `view(tag)\nvalues("${tag}")\non(${database}.${namespace})`;
+                viewTagSNL = `list(tag)\nvalues("${tag}")\non(${database}.${namespace})`;
             } else if (database) {
-                viewTagSNL = `view(tag)\nvalues("${tag}")\non(${database})`;
+                viewTagSNL = `list(tag)\nvalues("${tag}")\non(${database})`;
             } else {
-                viewTagSNL = `view(tag)\nvalues("${tag}")\non()`;
+                viewTagSNL = `list(tag)\nvalues("${tag}")\non()`;
             }
 
             const response = await this.sender.executeSNL(viewTagSNL, aiToken);

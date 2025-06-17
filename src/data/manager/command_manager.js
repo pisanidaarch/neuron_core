@@ -52,7 +52,7 @@ class CommandManager {
 
             command.updatedAt = new Date().toISOString();
             const commandData = command.toObject();
-            const snlCommand = this.snl.createCommandSNL(this.database, this.namespace, command.id, commandData);
+            const snlCommand = this.snl.setCommandSNL(this.database, this.namespace, command.id, commandData);
             await this.sender.executeSNL(snlCommand, this.aiToken);
 
             console.log(`✅ Command saved: ${command.id}`);
@@ -172,7 +172,7 @@ class CommandManager {
                 throw new ValidationError(`Cannot delete system command: ${commandId}`);
             }
 
-            const snlCommand = this.snl.deleteCommandSNL(this.database, this.namespace, commandId);
+            const snlCommand = this.snl.removeCommandSNL(this.database, this.namespace, commandId);
             await this.sender.executeSNL(snlCommand, this.aiToken);
 
             console.log(`✅ Command deleted: ${commandId}`);

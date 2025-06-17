@@ -1,199 +1,121 @@
 // src/data/snl/user_snl.js
 
+const BaseSNL = require('./base_snl');
+
 /**
- * UserSNL - SNL commands for User entity
+ * User SNL - Generates SNL commands for user operations
  */
-class UserSNL {
+class UserSNL extends BaseSNL {
     constructor() {
-        // SNL commands are defined as methods
+        super();
+        this.database = 'main';
+        this.namespace = 'core';
+        this.entity = 'users';
     }
 
     /**
-     * Get users list SNL
-     * @returns {string}
-     */
-    getListUsersSNL() {
-        return 'list(structure)\nvalues("*")\non(main.core.users)';
-    }
-
-    /**
-     * Get specific user SNL
-     * @param {string} email - User email
-     * @returns {string}
+     * Get user by email - CORRECTED: using view instead of one
      */
     getUserSNL(email) {
-        if (!email) {
-            throw new Error('User email is required');
-        }
-        return `one(structure, id)\nvalues("${email}")\non(main.core.users)`;
+        const path = this.buildPath(this.database, this.namespace, this.entity, email);
+        return this.buildSNL('view', 'structure', null, path);
     }
 
     /**
-     * Create/Update user SNL
-     * @param {string} email - User email
-     * @param {Object} userData - User data
-     * @returns {string}
+     * Create or update user
      */
     setUserSNL(email, userData) {
-        if (!email || !userData) {
-            throw new Error('User email and data are required');
-        }
-        const userDataJson = JSON.stringify(userData);
-        return `set(structure)\nvalues("${email}", ${userDataJson})\non(main.core.users)`;
+        const path = this.buildPath(this.database, this.namespace, this.entity);
+        const values = [email, userData];
+        return this.buildSNL('set', 'structure', values, path);
     }
 
     /**
-     * Remove user SNL
-     * @param {string} email - User email
-     * @returns {string}
+     * List all users
      */
-    removeUserSNL(email) {
-        if (!email) {
-            throw new Error('User email is required');
-        }
-        return `remove(structure)\nvalues("${email}")\non(main.core.users)`;
+    listUsersSNL(pattern = '*') {
+        const path = this.buildPath(this.database, this.namespace);
+        return this.buildSNL('list', 'structure', pattern, path);
     }
 
     /**
-     * Search users SNL
-     * @param {string} searchTerm - Search term
-     * @returns {string}
+     * Search users by term
      */
     searchUsersSNL(searchTerm) {
-        if (!searchTerm) {
-            throw new Error('Search term is required');
-        }
-        return `search(structure)\nvalues("${searchTerm}")\non(main.core.users)`;
+        const path = this.buildPath(this.database, this.namespace);
+        return this.buildSNL('search', 'structure', searchTerm, path);
     }
 
     /**
-     * Parse users list response
-     * @param {Array|Object} response - Response from NeuronDB
-     * @returns {Array} Array of user emails
+     * Remove user
      */
-    parseUsersListResponse(response) {
-        if (!response) return [];
-
-        if (Array.isArray(response)) {
-            return response;
-        }
-
-        if (typeof response === 'object') {
-            return Object.keys(response);
-        }
-
-        return [];
+    removeUserSNL(email) {
+        const path = this.buildPath(this.database, this.namespace, this.entity);
+        return this.buildSNL('remove', 'structure', email, path);
     }
 
     /**
-     * Parse single user response
-     * @param {Object} response - Response from NeuronDB
-     * @returns {Object|null} User data
+     * Parse user from SNL response
      */
-    parseUserResponse(response) {
+    parseUser(response) {
         if (!response || typeof response !== 'object') {
             return null;
         }
 
+        // Response format: { "email": { userData } }
+        const emails = Object.keys(response);
+        if (emails.length === 0) {
+            return null;
+        }
+
+        const email = emails[0];
+        const userData = response[email];
+
         return {
-            email: response.email,
-            nick: response.nick,
-            roles: response.roles || { permissions: {} },
-            created_at: response.created_at,
-            updated_at: response.updated_at,
-            active: response.active !== undefined ? response.active : true
+            email,
+            ...userData
         };
     }
 
     /**
-     * Parse search results
-     * @param {Object} response - Response from NeuronDB
-     * @returns {Array} Array of matched users
+     * Parse multiple users from list response
      */
-    parseSearchResponse(response) {
+    parseUserList(response) {
         if (!response || typeof response !== 'object') {
             return [];
         }
 
-        const results = [];
-        for (const [email, userData] of Object.entries(response)) {
-            results.push({
-                email,
-                ...userData
-            });
+        return Object.entries(response).map(([email, userData]) => ({
+            email,
+            ...userData
+        }));
+    }
+
+    /**
+     * Validate user data structure
+     */
+    validateUserData(userData) {
+        const required = ['nick', 'password', 'group'];
+        const missing = required.filter(field => !userData[field]);
+
+        if (missing.length > 0) {
+            throw new Error(`Missing required user fields: ${missing.join(', ')}`);
         }
 
-        return results;
-    }
-
-    /**
-     * Build user data for NeuronDB
-     * @param {Object} user - User entity
-     * @returns {Object} User data formatted for NeuronDB
-     */
-    buildUserData(user) {
-        return {
-            email: user.email,
-            nick: user.nick,
-            roles: user.roles,
-            created_at: user.created_at,
-            updated_at: user.updated_at,
-            active: user.active
-        };
-    }
-
-    /**
-     * Create initial users structure if it doesn't exist
-     * @returns {string}
-     */
-    createUsersStructureSNL() {
-        return 'set(structure)\nvalues("users", {})\non(main.core.users)';
-    }
-
-    /**
-     * Get all users with their data
-     * @returns {string}
-     */
-    getAllUsersSNL() {
-        return 'view(structure)\non(main.core.users)';
-    }
-
-    /**
-     * Parse all users response
-     * @param {Object} response - Response from NeuronDB
-     * @returns {Object} Object with email as key and user data as value
-     */
-    parseAllUsersResponse(response) {
-        if (!response || typeof response !== 'object') {
-            return {};
+        // Validate types
+        if (typeof userData.nick !== 'string') {
+            throw new Error('User nick must be a string');
         }
 
-        return response;
-    }
-
-    /**
-     * Check if users structure exists
-     * @returns {string}
-     */
-    checkUsersStructureExistsSNL() {
-        return 'list(structure)\nvalues("users")\non(main.core)';
-    }
-
-    /**
-     * Parse structure exists response
-     * @param {Array|Object} response - Response from NeuronDB
-     * @returns {boolean} True if structure exists
-     */
-    parseStructureExistsResponse(response) {
-        if (Array.isArray(response)) {
-            return response.includes('users');
+        if (typeof userData.password !== 'string' || userData.password.length < 6) {
+            throw new Error('User password must be a string with at least 6 characters');
         }
 
-        if (typeof response === 'object') {
-            return Object.keys(response).includes('users');
+        if (typeof userData.group !== 'string') {
+            throw new Error('User group must be a string');
         }
 
-        return false;
+        return true;
     }
 }
 

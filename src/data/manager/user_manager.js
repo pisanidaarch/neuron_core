@@ -1,329 +1,279 @@
 // src/data/manager/user_manager.js
 
-const User = require('../../cross/entity/user');
+const BaseManager = require('./base_manager');
 const UserSNL = require('../snl/user_snl');
-const NeuronDBSender = require('../neuron_db/sender');
+const User = require('../../cross/entity/user');
+const { ValidationError, NotFoundError } = require('../../cross/entity/errors');
 
 /**
- * UserManager - Manages User entity operations
+ * User Manager - Manages user operations
+ * Implements the flow: entity => manager => snl => sender => manager => entity
  */
-class UserManager {
-    constructor(aiKey) {
-        this.aiKey = aiKey;
-        this.userSNL = new UserSNL();
-        this.sender = new NeuronDBSender();
+class UserManager extends BaseManager {
+    constructor() {
+        super();
+        this.snl = new UserSNL();
     }
 
     /**
-     * Initialize users structure if needed
-     * @returns {Promise<void>}
+     * Create user
+     * @param {User} userEntity - User entity to create
+     * @param {string} token - Authentication token
+     * @returns {User} Created user entity
      */
-    async initialize() {
+    async createUser(userEntity, token) {
+        this.validateInitialized();
+
         try {
-            const checkCommand = this.userSNL.checkUsersStructureExistsSNL();
-            const checkResponse = await this.sender.executeSNL(checkCommand, this.aiKey);
+            // Validate entity
+            this.validateEntity(userEntity);
 
-            const exists = this.userSNL.parseStructureExistsResponse(checkResponse);
-            if (!exists) {
-                const createCommand = this.userSNL.createUsersStructureSNL();
-                await this.sender.executeSNL(createCommand, this.aiKey);
-            }
+            // Transform entity for storage
+            const userData = this.transformForStorage(userEntity);
+
+            // Generate SNL command
+            const snlCommand = this.snl.setUserSNL(userEntity.email, userData);
+
+            // Execute SNL via sender
+            const response = await this.executeSNL(snlCommand, token);
+
+            // Log operation
+            this.logOperation('createUser', { email: userEntity.email });
+
+            // Transform response back to entity
+            return this.transformToEntity({
+                email: userEntity.email,
+                ...userData,
+                createdAt: new Date().toISOString()
+            });
+
         } catch (error) {
-            console.error('Failed to initialize users structure:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Create or update user
-     * @param {User} user - User entity
-     * @returns {Promise<User>}
-     */
-    async saveUser(user) {
-        try {
-            const validation = user.validate();
-            if (!validation.valid) {
-                throw new Error(`User validation failed: ${validation.errors.join(', ')}`);
-            }
-
-            const userData = this.userSNL.buildUserData(user);
-            const command = this.userSNL.setUserSNL(user.email, userData);
-            await this.sender.executeSNL(command, this.aiKey);
-
-            return user;
-        } catch (error) {
-            console.error('Failed to save user:', error);
-            throw error;
+            throw this.handleError(error);
         }
     }
 
     /**
      * Get user by email
      * @param {string} email - User email
-     * @returns {Promise<User|null>}
+     * @param {string} token - Authentication token
+     * @returns {User} User entity
      */
-    async getUser(email) {
-        try {
-            const command = this.userSNL.getUserSNL(email);
-            const response = await this.sender.executeSNL(command, this.aiKey);
+    async getUser(email, token) {
+        this.validateInitialized();
 
-            const userData = this.userSNL.parseUserResponse(response);
-            if (!userData) {
-                return null;
+        try {
+            // Generate SNL command
+            const snlCommand = this.snl.getUserSNL(email);
+
+            // Execute SNL via sender
+            const response = await this.executeSNL(snlCommand, token);
+
+            if (!response || Object.keys(response).length === 0) {
+                throw new NotFoundError(`User not found: ${email}`);
             }
 
-            return User.fromNeuronDB(userData);
+            // Parse response
+            const userData = this.snl.parseUser(response);
+
+            // Transform to entity
+            return this.transformToEntity(userData);
+
         } catch (error) {
-            console.error('Failed to get user:', error);
-            return null;
+            throw this.handleError(error);
         }
     }
 
     /**
-     * Get all users
-     * @returns {Promise<User[]>}
+     * Update user
+     * @param {User} userEntity - User entity with updates
+     * @param {string} token - Authentication token
+     * @returns {User} Updated user entity
      */
-    async getAllUsers() {
+    async updateUser(userEntity, token) {
+        this.validateInitialized();
+
         try {
-            const command = this.userSNL.getAllUsersSNL();
-            const response = await this.sender.executeSNL(command, this.aiKey);
+            // Validate entity
+            this.validateEntity(userEntity);
 
-            const usersData = this.userSNL.parseAllUsersResponse(response);
-            const users = [];
+            // Get existing user to merge data
+            const existingUser = await this.getUser(userEntity.email, token);
 
-            for (const [email, userData] of Object.entries(usersData)) {
-                const user = User.fromNeuronDB({ email, ...userData });
-                users.push(user);
-            }
+            // Merge with existing data
+            const updatedData = {
+                ...existingUser.toJSON(),
+                ...this.transformForStorage(userEntity),
+                updatedAt: new Date().toISOString()
+            };
 
-            return users;
+            // Generate SNL command
+            const snlCommand = this.snl.setUserSNL(userEntity.email, updatedData);
+
+            // Execute SNL via sender
+            await this.executeSNL(snlCommand, token);
+
+            // Log operation
+            this.logOperation('updateUser', { email: userEntity.email });
+
+            // Return updated entity
+            return this.transformToEntity({
+                email: userEntity.email,
+                ...updatedData
+            });
+
         } catch (error) {
-            console.error('Failed to get all users:', error);
-            return [];
+            throw this.handleError(error);
         }
     }
 
     /**
-     * Get list of user emails
-     * @returns {Promise<string[]>}
+     * List users
+     * @param {string} pattern - Search pattern (default: '*')
+     * @param {string} token - Authentication token
+     * @returns {User[]} Array of user entities
      */
-    async getUserList() {
-        try {
-            const command = this.userSNL.getListUsersSNL();
-            const response = await this.sender.executeSNL(command, this.aiKey);
+    async listUsers(pattern = '*', token) {
+        this.validateInitialized();
 
-            return this.userSNL.parseUsersListResponse(response);
+        try {
+            // Generate SNL command
+            const snlCommand = this.snl.listUsersSNL(pattern);
+
+            // Execute SNL via sender
+            const response = await this.executeSNL(snlCommand, token);
+
+            // Parse response
+            const userList = this.snl.parseUserList(response);
+
+            // Transform each to entity
+            return userList.map(userData => this.transformToEntity(userData));
+
         } catch (error) {
-            console.error('Failed to get user list:', error);
-            return [];
+            throw this.handleError(error);
         }
     }
 
     /**
      * Search users
      * @param {string} searchTerm - Search term
-     * @returns {Promise<User[]>}
+     * @param {string} token - Authentication token
+     * @returns {User[]} Array of matching user entities
      */
-    async searchUsers(searchTerm) {
+    async searchUsers(searchTerm, token) {
+        this.validateInitialized();
+
         try {
-            const command = this.userSNL.searchUsersSNL(searchTerm);
-            const response = await this.sender.executeSNL(command, this.aiKey);
+            // Generate SNL command
+            const snlCommand = this.snl.searchUsersSNL(searchTerm);
 
-            const searchResults = this.userSNL.parseSearchResponse(response);
-            const users = [];
+            // Execute SNL via sender
+            const response = await this.executeSNL(snlCommand, token);
 
-            for (const userData of searchResults) {
-                const user = User.fromNeuronDB(userData);
-                users.push(user);
-            }
+            // Parse response
+            const userList = this.snl.parseUserList(response);
 
-            return users;
+            // Transform each to entity
+            return userList.map(userData => this.transformToEntity(userData));
+
         } catch (error) {
-            console.error('Failed to search users:', error);
-            return [];
+            throw this.handleError(error);
         }
     }
 
     /**
-     * Remove user
+     * Delete user
      * @param {string} email - User email
-     * @returns {Promise<boolean>}
+     * @param {string} token - Authentication token
      */
-    async removeUser(email) {
+    async deleteUser(email, token) {
+        this.validateInitialized();
+
         try {
-            const command = this.userSNL.removeUserSNL(email);
-            await this.sender.executeSNL(command, this.aiKey);
-            return true;
+            // Generate SNL command
+            const snlCommand = this.snl.removeUserSNL(email);
+
+            // Execute SNL via sender
+            await this.executeSNL(snlCommand, token);
+
+            // Log operation
+            this.logOperation('deleteUser', { email });
+
         } catch (error) {
-            console.error('Failed to remove user:', error);
-            return false;
+            throw this.handleError(error);
         }
+    }
+
+    /**
+     * Validate user entity
+     * @param {User} entity - User entity to validate
+     */
+    validateEntity(entity) {
+        if (!entity || !(entity instanceof User)) {
+            throw new ValidationError('Invalid user entity');
+        }
+
+        const errors = entity.validate();
+        if (errors.length > 0) {
+            throw new ValidationError(`User validation failed: ${errors.join(', ')}`);
+        }
+    }
+
+    /**
+     * Transform user entity for storage
+     * @param {User} entity - User entity
+     * @returns {Object} Data for storage
+     */
+    transformForStorage(entity) {
+        const data = entity.toJSON();
+
+        // Remove email from data (it's used as key)
+        delete data.email;
+
+        // Ensure required fields
+        return {
+            nick: data.nick,
+            password: data.password,
+            group: data.group || 'default',
+            active: data.active !== false,
+            permissions: data.permissions || [],
+            metadata: data.metadata || {}
+        };
+    }
+
+    /**
+     * Transform response data to user entity
+     * @param {Object} data - Response data
+     * @returns {User} User entity
+     */
+    transformToEntity(data) {
+        return new User({
+            email: data.email,
+            nick: data.nick,
+            password: data.password,
+            group: data.group,
+            active: data.active,
+            permissions: data.permissions || [],
+            metadata: data.metadata || {},
+            createdAt: data.createdAt,
+            updatedAt: data.updatedAt
+        });
     }
 
     /**
      * Check if user exists
      * @param {string} email - User email
-     * @returns {Promise<boolean>}
+     * @param {string} token - Authentication token
+     * @returns {boolean} True if user exists
      */
-    async userExists(email) {
-        const user = await this.getUser(email);
-        return user !== null;
-    }
-
-    /**
-     * Create user with default permissions
-     * @param {string} email - User email
-     * @param {string} password - User password
-     * @param {string} nick - User nickname
-     * @param {Object} permissions - Initial permissions
-     * @returns {Promise<User>}
-     */
-    async createUser(email, password, nick, permissions = {}) {
+    async userExists(email, token) {
         try {
-            const user = new User({
-                email,
-                password,
-                nick,
-                roles: {
-                    permissions: permissions
-                }
-            });
-
-            return await this.saveUser(user);
+            await this.getUser(email, token);
+            return true;
         } catch (error) {
-            console.error('Failed to create user:', error);
+            if (error instanceof NotFoundError) {
+                return false;
+            }
             throw error;
-        }
-    }
-
-    /**
-     * Update user permissions
-     * @param {string} email - User email
-     * @param {string} database - Database name
-     * @param {number} level - Permission level
-     * @returns {Promise<boolean>}
-     */
-    async updateUserPermission(email, database, level) {
-        try {
-            const user = await this.getUser(email);
-            if (!user) {
-                throw new Error('User not found');
-            }
-
-            user.addPermission(database, level);
-            await this.saveUser(user);
-            return true;
-        } catch (error) {
-            console.error('Failed to update user permission:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Remove user permission
-     * @param {string} email - User email
-     * @param {string} database - Database name
-     * @returns {Promise<boolean>}
-     */
-    async removeUserPermission(email, database) {
-        try {
-            const user = await this.getUser(email);
-            if (!user) {
-                throw new Error('User not found');
-            }
-
-            user.removePermission(database);
-            await this.saveUser(user);
-            return true;
-        } catch (error) {
-            console.error('Failed to remove user permission:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Activate user
-     * @param {string} email - User email
-     * @returns {Promise<boolean>}
-     */
-    async activateUser(email) {
-        try {
-            const user = await this.getUser(email);
-            if (!user) {
-                throw new Error('User not found');
-            }
-
-            user.activate();
-            await this.saveUser(user);
-            return true;
-        } catch (error) {
-            console.error('Failed to activate user:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Deactivate user
-     * @param {string} email - User email
-     * @returns {Promise<boolean>}
-     */
-    async deactivateUser(email) {
-        try {
-            const user = await this.getUser(email);
-            if (!user) {
-                throw new Error('User not found');
-            }
-
-            user.deactivate();
-            await this.saveUser(user);
-            return true;
-        } catch (error) {
-            console.error('Failed to deactivate user:', error);
-            return false;
-        }
-    }
-
-    /**
-     * Get active users only
-     * @returns {Promise<User[]>}
-     */
-    async getActiveUsers() {
-        const allUsers = await this.getAllUsers();
-        return allUsers.filter(user => user.active);
-    }
-
-    /**
-     * Create subscription admin user if not exists
-     * @returns {Promise<User|null>}
-     */
-    async createSubscriptionAdminUser() {
-        try {
-            const adminEmail = 'subscription_admin@system.local';
-            const existingUser = await this.getUser(adminEmail);
-
-            if (existingUser) {
-                return existingUser;
-            }
-
-            const adminUser = new User({
-                email: adminEmail,
-                password: 'sudo_subscription_admin',
-                nick: 'Subscription Admin',
-                roles: {
-                    permissions: {
-                        main: 3, // Admin level
-                        timeline: 3,
-                        'user-data': 3,
-                        workflow: 3,
-                        'workflow-hist': 3
-                    }
-                }
-            });
-
-            return await this.saveUser(adminUser);
-        } catch (error) {
-            console.error('Failed to create subscription admin user:', error);
-            return null;
         }
     }
 }

@@ -1,143 +1,162 @@
 // src/cross/entity/user.js
 
 /**
- * User entity for NeuronCore security module
+ * User Entity - Represents a user in the system
+ * Used as DTO between layers
  */
 class User {
     constructor(data = {}) {
-        this.email = data.email || '';
-        this.password = data.password || '';
-        this.nick = data.nick || '';
-        this.roles = data.roles || { permissions: {} };
-        this.created_at = data.created_at || new Date().toISOString();
-        this.updated_at = data.updated_at || new Date().toISOString();
-        this.active = data.active !== undefined ? data.active : true;
+        this.email = data.email || null;
+        this.nick = data.nick || null;
+        this.password = data.password || null;
+        this.group = data.group || 'default';
+        this.active = data.active !== false;
+        this.permissions = data.permissions || [];
+        this.metadata = data.metadata || {};
+        this.createdAt = data.createdAt || null;
+        this.updatedAt = data.updatedAt || null;
     }
 
     /**
-     * Create user from NeuronDB response
-     * @param {Object} data - User data from NeuronDB
-     * @returns {User}
-     */
-    static fromNeuronDB(data) {
-        return new User({
-            email: data.email,
-            nick: data.nick,
-            roles: data.roles || { permissions: {} },
-            created_at: data.created_at,
-            updated_at: data.updated_at,
-            active: data.active
-        });
-    }
-
-    /**
-     * Convert to NeuronDB format
-     * @returns {Object}
-     */
-    toNeuronDB() {
-        const data = {
-            email: this.email,
-            nick: this.nick,
-            roles: this.roles,
-            created_at: this.created_at,
-            updated_at: this.updated_at,
-            active: this.active
-        };
-
-        // Include password only if it's set (for creation/update)
-        if (this.password) {
-            data.password = this.password;
-        }
-
-        return data;
-    }
-
-    /**
-     * Validate user data
-     * @returns {Object} { valid: boolean, errors: string[] }
+     * Validate user entity
+     * @returns {string[]} Array of validation errors
      */
     validate() {
         const errors = [];
 
-        if (!this.email || !this.email.includes('@')) {
-            errors.push('Valid email is required');
+        if (!this.email) {
+            errors.push('Email is required');
+        } else if (!this.isValidEmail(this.email)) {
+            errors.push('Invalid email format');
         }
 
-        if (!this.nick || this.nick.length < 2) {
+        if (!this.nick) {
+            errors.push('Nick is required');
+        } else if (this.nick.length < 2) {
             errors.push('Nick must be at least 2 characters');
         }
 
-        if (this.password && this.password.length < 6) {
+        if (!this.password) {
+            errors.push('Password is required');
+        } else if (this.password.length < 6) {
             errors.push('Password must be at least 6 characters');
         }
 
+        if (!this.group) {
+            errors.push('Group is required');
+        }
+
+        if (!Array.isArray(this.permissions)) {
+            errors.push('Permissions must be an array');
+        }
+
+        return errors;
+    }
+
+    /**
+     * Check if email is valid
+     */
+    isValidEmail(email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+    }
+
+    /**
+     * Check if user has permission
+     */
+    hasPermission(permission) {
+        return this.permissions.includes(permission);
+    }
+
+    /**
+     * Check if user is in group
+     */
+    isInGroup(group) {
+        return this.group === group;
+    }
+
+    /**
+     * Check if user is admin
+     */
+    isAdmin() {
+        return this.group === 'admin' || this.group === 'subscription_admin';
+    }
+
+    /**
+     * Check if user is active
+     */
+    isActive() {
+        return this.active === true;
+    }
+
+    /**
+     * Convert to JSON
+     */
+    toJSON() {
         return {
-            valid: errors.length === 0,
-            errors
+            email: this.email,
+            nick: this.nick,
+            password: this.password,
+            group: this.group,
+            active: this.active,
+            permissions: this.permissions,
+            metadata: this.metadata,
+            createdAt: this.createdAt,
+            updatedAt: this.updatedAt
         };
     }
 
     /**
-     * Check if user has specific permission level on database
-     * @param {string} database - Database name
-     * @param {number} requiredLevel - Required permission level (1-3)
-     * @returns {boolean}
+     * Convert to safe JSON (without password)
      */
-    hasPermission(database, requiredLevel) {
-        const permissions = this.roles?.permissions || {};
-        const userLevel = permissions[database] || 0;
-        return userLevel >= requiredLevel;
+    toSafeJSON() {
+        const data = this.toJSON();
+        delete data.password;
+        return data;
     }
 
     /**
-     * Add permission to user
-     * @param {string} database - Database name
-     * @param {number} level - Permission level (1-3)
+     * Create from JSON
      */
-    addPermission(database, level) {
-        if (!this.roles) {
-            this.roles = { permissions: {} };
-        }
-        if (!this.roles.permissions) {
-            this.roles.permissions = {};
-        }
-        this.roles.permissions[database] = level;
-        this.updated_at = new Date().toISOString();
+    static fromJSON(data) {
+        return new User(data);
     }
 
     /**
-     * Remove permission from user
-     * @param {string} database - Database name
+     * Clone user
      */
-    removePermission(database) {
-        if (this.roles?.permissions) {
-            delete this.roles.permissions[database];
-            this.updated_at = new Date().toISOString();
-        }
+    clone() {
+        return new User(this.toJSON());
     }
 
     /**
-     * Get user permissions
-     * @returns {Object} Permissions object
+     * Update user data
      */
-    getPermissions() {
-        return this.roles?.permissions || {};
+    update(data) {
+        if (data.email !== undefined) this.email = data.email;
+        if (data.nick !== undefined) this.nick = data.nick;
+        if (data.password !== undefined) this.password = data.password;
+        if (data.group !== undefined) this.group = data.group;
+        if (data.active !== undefined) this.active = data.active;
+        if (data.permissions !== undefined) this.permissions = data.permissions;
+        if (data.metadata !== undefined) this.metadata = data.metadata;
+        this.updatedAt = new Date().toISOString();
+        return this;
     }
 
     /**
-     * Set user as inactive
+     * Check equality
      */
-    deactivate() {
-        this.active = false;
-        this.updated_at = new Date().toISOString();
+    equals(other) {
+        if (!(other instanceof User)) return false;
+        return this.email === other.email;
     }
 
     /**
-     * Set user as active
+     * Get display name
      */
-    activate() {
-        this.active = true;
-        this.updated_at = new Date().toISOString();
+    getDisplayName() {
+        return this.nick || this.email;
     }
 }
 

@@ -1,274 +1,244 @@
 // src/cross/entity/keys_vo.js
 
+const ConfigSNL = require('../../data/snl/config_snl');
+const NeuronDBSender = require('../../data/neuron_db/sender');
+
 /**
- * KeysVO - Value Object for managing all system keys and tokens
- * Implements singleton pattern with lazy loading
- * Now supports dynamic refresh from database
+ * KeysVO - Value Object for system keys (Singleton)
+ * Stores all keys from config database and active AI
+ * Auto-refreshes after 1 hour timeout
  */
 class KeysVO {
     constructor() {
+        // Singleton instance
         if (KeysVO.instance) {
             return KeysVO.instance;
         }
 
-        this.configUrl = null;
-        this.configToken = null;
-        this.aiInstances = new Map();
-        this.jwtSecret = null;
-        this.tokenExpiry = '24h';
+        this.keys = {
+            config: {},      // Keys from config database
+            ai: {}           // Keys from active AI
+        };
+
         this.lastRefresh = null;
-        this.refreshTimeout = 60 * 60 * 1000; // 1 hour
-        this.refreshCallback = null; // Callback for dynamic refresh
+        this.timeout = 60 * 60 * 1000; // 1 hour in milliseconds
+        this.configSNL = new ConfigSNL();
+        this.configSender = new NeuronDBSender();
+        this.aiSender = null; // Set when AI is selected
 
         KeysVO.instance = this;
     }
 
     /**
      * Get singleton instance
-     * @returns {Promise<KeysVO>}
      */
-    static async getInstance() {
+    static getInstance() {
         if (!KeysVO.instance) {
             KeysVO.instance = new KeysVO();
         }
-
-        // Check if refresh is needed
-        const now = Date.now();
-        if (!KeysVO.instance.lastRefresh ||
-            (now - KeysVO.instance.lastRefresh) > KeysVO.instance.refreshTimeout) {
-            await KeysVO.instance.refresh();
-        }
-
         return KeysVO.instance;
     }
 
     /**
-     * Set refresh callback for dynamic token loading
-     * @param {Function} callback - Async function to refresh tokens
+     * Check if refresh is needed
      */
-    setRefreshCallback(callback) {
-        this.refreshCallback = callback;
+    needsRefresh() {
+        if (!this.lastRefresh) return true;
+
+        const now = Date.now();
+        const elapsed = now - this.lastRefresh;
+
+        return elapsed > this.timeout;
     }
 
     /**
-     * Set config database credentials
-     * @param {string} url - Config database URL
-     * @param {string} token - Config database token
+     * Set active AI sender
      */
-    setConfigCredentials(url, token) {
-        this.configUrl = url;
-        this.configToken = token;
-        this.lastRefresh = Date.now();
+    setAISender(aiSender) {
+        this.aiSender = aiSender;
+        // Clear AI keys when changing AI
+        this.keys.ai = {};
+        this.lastRefresh = null;
     }
 
     /**
-     * Set AI instance credentials
-     * @param {string} aiName - AI instance name
-     * @param {string} url - AI database URL
-     * @param {string} token - AI database token
+     * Refresh all keys
      */
-    setAICredentials(aiName, url, token) {
-        this.aiInstances.set(aiName, {
-            name: aiName,
-            url: url,
-            token: token,
-            lastUpdated: Date.now()
-        });
-        this.lastRefresh = Date.now();
-    }
-
-    /**
-     * Set JWT secret
-     * @param {string} secret - JWT secret
-     */
-    setJWTSecret(secret) {
-        this.jwtSecret = secret;
-    }
-
-    /**
-     * Set token expiry
-     * @param {string} expiry - Token expiry (e.g., '24h', '7d')
-     */
-    setTokenExpiry(expiry) {
-        this.tokenExpiry = expiry;
-    }
-
-    /**
-     * Get config database token
-     * @returns {string|null}
-     */
-    getConfigToken() {
-        return this.configToken;
-    }
-
-    /**
-     * Get config database URL
-     * @returns {string|null}
-     */
-    getConfigUrl() {
-        return this.configUrl;
-    }
-
-    /**
-     * Get AI instance credentials
-     * @param {string} aiName - AI instance name
-     * @returns {Object|null}
-     */
-    getAICredentials(aiName) {
-        return this.aiInstances.get(aiName) || null;
-    }
-
-    /**
-     * Get AI instance token
-     * @param {string} aiName - AI instance name
-     * @returns {string|null}
-     */
-    getAIToken(aiName) {
-        const credentials = this.getAICredentials(aiName);
-        return credentials ? credentials.token : null;
-    }
-
-    /**
-     * Get AI instance URL
-     * @param {string} aiName - AI instance name
-     * @returns {string|null}
-     */
-    getAIUrl(aiName) {
-        const credentials = this.getAICredentials(aiName);
-        return credentials ? credentials.url : null;
-    }
-
-    /**
-     * Get JWT secret
-     * @returns {string|null}
-     */
-    getJWTSecret() {
-        return this.jwtSecret;
-    }
-
-    /**
-     * Get token expiry
-     * @returns {string}
-     */
-    getTokenExpiry() {
-        return this.tokenExpiry;
-    }
-
-    /**
-     * Get all AI instance names
-     * @returns {Array<string>}
-     */
-    getAINames() {
-        return Array.from(this.aiInstances.keys());
-    }
-
-    /**
-     * Check if AI instance exists
-     * @param {string} aiName - AI instance name
-     * @returns {boolean}
-     */
-    hasAI(aiName) {
-        return this.aiInstances.has(aiName);
-    }
-
-    /**
-     * Refresh instance - reload tokens from database
-     * @returns {Promise<void>}
-     */
-    async refresh() {
+    async refresh(token) {
         try {
-            // If a refresh callback is set, use it
-            if (this.refreshCallback && typeof this.refreshCallback === 'function') {
-                await this.refreshCallback();
+            // Refresh config keys
+            await this.refreshConfigKeys(token);
+
+            // Refresh AI keys if AI is set
+            if (this.aiSender) {
+                await this.refreshAIKeys(token);
             }
 
             this.lastRefresh = Date.now();
-            console.log('🔄 KeysVO refreshed');
+
         } catch (error) {
-            console.error('❌ Failed to refresh KeysVO:', error);
-            // Don't throw - keep using cached values
+            console.error('Error refreshing keys:', error);
+            throw error;
         }
     }
 
     /**
-     * Force refresh - bypass timeout check
-     * @returns {Promise<void>}
+     * Refresh config database keys
      */
-    async forceRefresh() {
-        this.lastRefresh = 0; // Reset to force refresh
-        await this.refresh();
+    async refreshConfigKeys(token) {
+        try {
+            // Get API keys
+            const apiKeysSNL = 'view(structure)\non(config.keys.api)';
+            const apiKeysResponse = await this.configSender.executeSNL(apiKeysSNL, token);
+            this.keys.config.api = this.parseKeysResponse(apiKeysResponse);
+
+            // Get system keys
+            const systemKeysSNL = 'view(structure)\non(config.keys.system)';
+            const systemKeysResponse = await this.configSender.executeSNL(systemKeysSNL, token);
+            this.keys.config.system = this.parseKeysResponse(systemKeysResponse);
+
+            // Get security keys
+            const securityKeysSNL = 'view(structure)\non(config.keys.security)';
+            const securityKeysResponse = await this.configSender.executeSNL(securityKeysSNL, token);
+            this.keys.config.security = this.parseKeysResponse(securityKeysResponse);
+
+        } catch (error) {
+            console.error('Error refreshing config keys:', error);
+            // Don't throw - partial refresh is better than none
+        }
     }
 
     /**
-     * Validate that all required keys are present
-     * @returns {Object}
+     * Refresh AI database keys
      */
-    validate() {
-        const errors = [];
+    async refreshAIKeys(token) {
+        if (!this.aiSender) return;
 
-        if (!this.configToken) {
-            errors.push('Config token is not set');
+        try {
+            // Get AI-specific keys
+            const aiKeysSNL = 'view(structure)\non(keys.ai_config)';
+            const aiKeysResponse = await this.aiSender.executeSNL(aiKeysSNL, token);
+            this.keys.ai.config = this.parseKeysResponse(aiKeysResponse);
+
+            // Get AI model keys
+            const modelKeysSNL = 'view(structure)\non(keys.models)';
+            const modelKeysResponse = await this.aiSender.executeSNL(modelKeysSNL, token);
+            this.keys.ai.models = this.parseKeysResponse(modelKeysResponse);
+
+        } catch (error) {
+            console.error('Error refreshing AI keys:', error);
+            // Don't throw - partial refresh is better than none
+        }
+    }
+
+    /**
+     * Parse keys response from SNL
+     */
+    parseKeysResponse(response) {
+        if (!response || typeof response !== 'object') {
+            return {};
         }
 
-        if (!this.configUrl) {
-            errors.push('Config URL is not set');
+        // If response has nested structure, flatten it
+        const keys = {};
+        Object.entries(response).forEach(([key, value]) => {
+            if (typeof value === 'object' && value !== null) {
+                // Nested object - extract actual key value
+                keys[key] = value.value || value;
+            } else {
+                keys[key] = value;
+            }
+        });
+
+        return keys;
+    }
+
+    /**
+     * Get key value
+     */
+    async get(keyPath, token = null) {
+        // Check if refresh needed
+        if (this.needsRefresh() && token) {
+            await this.refresh(token);
         }
 
-        // AI instances are now optional as they can be loaded dynamically
-        if (this.aiInstances.size === 0) {
-            console.warn('⚠️  No AI instances configured - will be loaded from database');
+        // Parse key path (e.g., "config.api.openai" or "ai.models.gpt4")
+        const parts = keyPath.split('.');
+
+        let value = this.keys;
+        for (const part of parts) {
+            if (value && typeof value === 'object') {
+                value = value[part];
+            } else {
+                return null;
+            }
         }
 
-        if (!this.jwtSecret) {
-            errors.push('JWT secret is not set');
-        }
+        return value;
+    }
 
+    /**
+     * Get all config keys
+     */
+    getConfigKeys() {
+        return { ...this.keys.config };
+    }
+
+    /**
+     * Get all AI keys
+     */
+    getAIKeys() {
+        return { ...this.keys.ai };
+    }
+
+    /**
+     * Get all keys
+     */
+    getAllKeys() {
         return {
-            valid: errors.length === 0,
-            errors
-        };
-    }
-
-    /**
-     * Get instance info for debugging
-     * @returns {Object}
-     */
-    getInfo() {
-        return {
-            configUrl: this.configUrl,
-            hasConfigToken: !!this.configToken,
-            aiInstances: Array.from(this.aiInstances.entries()).map(([name, data]) => ({
-                name,
-                url: data.url,
-                hasToken: !!data.token,
-                lastUpdated: data.lastUpdated
-            })),
-            hasJWTSecret: !!this.jwtSecret,
-            tokenExpiry: this.tokenExpiry,
+            config: this.getConfigKeys(),
+            ai: this.getAIKeys(),
             lastRefresh: this.lastRefresh,
-            refreshTimeout: this.refreshTimeout
+            needsRefresh: this.needsRefresh()
         };
     }
 
     /**
-     * Clear all data (useful for testing)
+     * Set key value (for testing/mocking)
+     */
+    setKey(keyPath, value) {
+        const parts = keyPath.split('.');
+
+        let target = this.keys;
+        for (let i = 0; i < parts.length - 1; i++) {
+            const part = parts[i];
+            if (!target[part] || typeof target[part] !== 'object') {
+                target[part] = {};
+            }
+            target = target[part];
+        }
+
+        target[parts[parts.length - 1]] = value;
+    }
+
+    /**
+     * Clear all keys
      */
     clear() {
-        this.configUrl = null;
-        this.configToken = null;
-        this.aiInstances.clear();
-        this.jwtSecret = null;
-        this.tokenExpiry = '24h';
+        this.keys = {
+            config: {},
+            ai: {}
+        };
         this.lastRefresh = null;
-        this.refreshCallback = null;
     }
 
     /**
-     * Reset singleton (useful for testing)
+     * Force refresh on next access
      */
-    static reset() {
-        KeysVO.instance = null;
+    invalidate() {
+        this.lastRefresh = null;
     }
 }
 
-module.exports = KeysVO;
+// Export singleton instance
+module.exports = KeysVO.getInstance();

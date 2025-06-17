@@ -1,252 +1,154 @@
-// src/data/snl/user_group_snl.js
+// src/data/snl/group_snl.js
+
+const BaseSNL = require('./base_snl');
 
 /**
- * User Group SNL - Group management SNL commands
+ * Group SNL - Generates SNL commands for group operations
  */
-class UserGroupSNL {
+class GroupSNL extends BaseSNL {
     constructor() {
-        this.entityName = 'usergroup';
+        super();
+        this.database = 'main';
+        this.namespace = 'core';
+        this.entity = 'groups';
     }
 
     /**
-     * Generate create group SNL command
-     * @param {Object} groupData - Group data
-     * @returns {string} SNL command
+     * Get group by name - CORRECTED: no values() in view
      */
-    generateCreateGroupSNL(groupData) {
-        const { name, description, permissions = [], isHidden = false, isSystem = false } = groupData;
-
-        const groupObject = {
-            name,
-            description,
-            permissions,
-            isHidden,
-            isSystem,
-            members: [],
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-        };
-
-        return `set(structure)\nvalues("${this.entityName}", ${JSON.stringify(groupObject)})\non(main.core.${name})`;
+    getGroupSNL(groupName) {
+        const path = this.buildPath(this.database, this.namespace, this.entity, groupName);
+        return this.buildSNL('view', 'structure', null, path);
     }
 
     /**
-     * Generate get group SNL command
-     * @param {string} groupName - Group name
-     * @returns {string} SNL command
+     * Create or update group
      */
-    generateGetGroupSNL(groupName) {
-        return `view(structure)\nvalues("${this.entityName}")\non(main.core.${groupName})`;
+    setGroupSNL(groupName, groupData) {
+        const path = this.buildPath(this.database, this.namespace, this.entity);
+        const values = [groupName, groupData];
+        return this.buildSNL('set', 'structure', values, path);
     }
 
     /**
-     * Generate list groups SNL command
-     * @param {boolean} includeHidden - Include hidden groups
-     * @returns {string} SNL command
+     * List all groups
      */
-    generateListGroupsSNL(includeHidden = false) {
-        if (includeHidden) {
-            return `list(structure)\nvalues("${this.entityName}")\non(main.core)`;
-        } else {
-            return `search(structure)\nvalues("${this.entityName}")\nmatch("isHidden", false)\non(main.core)`;
-        }
+    listGroupsSNL(pattern = '*') {
+        const path = this.buildPath(this.database, this.namespace);
+        return this.buildSNL('list', 'structure', pattern, path);
     }
 
     /**
-     * Generate add member to group SNL command
-     * @param {string} groupName - Group name
-     * @param {string} userEmail - User email to add
-     * @returns {string} SNL command
+     * Search groups
      */
-    generateAddMemberSNL(groupName, userEmail) {
-        // First get current group data, then update with new member
-        return `view(structure)\nvalues("${this.entityName}")\non(main.core.${groupName})`;
+    searchGroupsSNL(searchTerm) {
+        const path = this.buildPath(this.database, this.namespace);
+        return this.buildSNL('search', 'structure', searchTerm, path);
     }
 
     /**
-     * Generate update group with new member SNL command
-     * @param {string} groupName - Group name
-     * @param {Array} updatedMembers - Updated members array
-     * @returns {string} SNL command
+     * Remove group
      */
-    generateUpdateGroupMembersSNL(groupName, updatedMembers) {
-        const updateData = {
-            members: updatedMembers,
-            updated_at: new Date().toISOString()
-        };
-
-        return `set(structure)\nvalues("${this.entityName}", ${JSON.stringify(updateData)})\non(main.core.${groupName})`;
+    removeGroupSNL(groupName) {
+        const path = this.buildPath(this.database, this.namespace, this.entity);
+        return this.buildSNL('remove', 'structure', groupName, path);
     }
 
     /**
-     * Generate remove member from group SNL command
-     * @param {string} groupName - Group name
-     * @param {string} userEmail - User email to remove
-     * @returns {string} SNL command
+     * Tag a group
      */
-    generateRemoveMemberSNL(groupName, userEmail) {
-        // First get current group data, then update without the member
-        return `view(structure)\nvalues("${this.entityName}")\non(main.core.${groupName})`;
+    tagGroupSNL(groupName, tagName) {
+        const path = this.buildPath(this.database, this.namespace, this.entity, groupName);
+        return this.buildSNL('tag', 'structure', tagName, path);
     }
 
     /**
-     * Generate delete group SNL command
-     * @param {string} groupName - Group name
-     * @returns {string} SNL command
+     * Remove tag from group
      */
-    generateDeleteGroupSNL(groupName) {
-        return `remove(structure)\nvalues("${this.entityName}")\non(main.core.${groupName})`;
+    untagGroupSNL(groupName, tagName) {
+        const path = this.buildPath(this.database, this.namespace, this.entity, groupName);
+        return this.buildSNL('untag', 'structure', tagName, path);
     }
 
     /**
-     * Generate get user groups SNL command
-     * @param {string} userEmail - User email
-     * @returns {string} SNL command
+     * Parse group from SNL response
      */
-    generateGetUserGroupsSNL(userEmail) {
-        return `search(structure)\nvalues("${this.entityName}")\nmatch("members", "${userEmail}")\non(main.core)`;
-    }
-
-    /**
-     * Parse group data from SNL response
-     * @param {Object} response - SNL response
-     * @returns {Object|null} Group data
-     */
-    parseGroupData(response) {
+    parseGroup(response) {
         if (!response || typeof response !== 'object') {
             return null;
         }
 
-        // Look for group data in the response
-        for (const [key, value] of Object.entries(response)) {
-            if (key !== this.entityName && typeof value === 'object' && value !== null) {
-                if (value.name) {
-                    return value;
-                }
-            }
+        // Response format: { "groupName": { groupData } }
+        const names = Object.keys(response);
+        if (names.length === 0) {
+            return null;
         }
 
-        return null;
+        const name = names[0];
+        const groupData = response[name];
+
+        return {
+            name,
+            ...groupData
+        };
     }
 
     /**
-     * Parse groups list from SNL response
-     * @param {Object} response - SNL response
-     * @returns {Array} Array of groups
+     * Parse multiple groups from list response
      */
-    parseGroupsList(response) {
-        const groups = [];
-
+    parseGroupList(response) {
         if (!response || typeof response !== 'object') {
-            return groups;
+            return [];
         }
 
-        for (const [key, value] of Object.entries(response)) {
-            if (key !== this.entityName && typeof value === 'object' && value !== null) {
-                if (value.name) {
-                    groups.push(value);
-                }
-            }
-        }
-
-        return groups;
+        return Object.entries(response).map(([name, groupData]) => ({
+            name,
+            ...groupData
+        }));
     }
 
     /**
-     * Get default system groups
-     * @returns {Array} Default groups
-     */
-    getDefaultSystemGroups() {
-        return [
-            {
-                name: 'subscription_admin',
-                description: 'System group for payment gateway integration',
-                permissions: [
-                    'subscription.create',
-                    'subscription.cancel',
-                    'subscription.change_plan',
-                    'subscription.view_all'
-                ],
-                isHidden: true,
-                isSystem: true
-            },
-            {
-                name: 'admin',
-                description: 'Administrators who purchase AI subscriptions',
-                permissions: [
-                    'user.create',
-                    'user.delete',
-                    'user.update',
-                    'user.view_all',
-                    'config.update_theme',
-                    'config.update_behavior',
-                    'subscription.cancel',
-                    'subscription.change_plan',
-                    'database.view',
-                    'namespace.view'
-                ],
-                isHidden: false,
-                isSystem: true
-            },
-            {
-                name: 'default',
-                description: 'Default users of the AI',
-                permissions: [
-                    'ai.chat',
-                    'ai.command_execute',
-                    'timeline.view_own',
-                    'timeline.create',
-                    'user_data.view_own',
-                    'user_data.create_own',
-                    'user_data.update_own'
-                ],
-                isHidden: false,
-                isSystem: true
-            }
-        ];
-    }
-
-    /**
-     * Validate group data
-     * @param {Object} groupData - Group data to validate
-     * @returns {Array} Array of validation errors
+     * Validate group data structure
      */
     validateGroupData(groupData) {
-        const errors = [];
-
-        if (!groupData.name || typeof groupData.name !== 'string') {
-            errors.push('Group name is required and must be a string');
-        } else if (groupData.name.length < 2) {
-            errors.push('Group name must be at least 2 characters long');
-        } else if (!/^[a-zA-Z0-9_-]+$/.test(groupData.name)) {
-            errors.push('Group name can only contain letters, numbers, underscores, and hyphens');
+        if (!groupData || typeof groupData !== 'object') {
+            throw new Error('Group data must be an object');
         }
 
-        if (!groupData.description || typeof groupData.description !== 'string') {
-            errors.push('Group description is required and must be a string');
-        }
-
+        // Groups can have custom fields, but validate basic structure
         if (groupData.permissions && !Array.isArray(groupData.permissions)) {
-            errors.push('Permissions must be an array');
+            throw new Error('Group permissions must be an array');
         }
 
-        return errors;
+        if (groupData.description && typeof groupData.description !== 'string') {
+            throw new Error('Group description must be a string');
+        }
+
+        return true;
     }
 
     /**
-     * Get default subscription admin credentials
-     * @returns {Object} Default credentials
+     * Default group structures
      */
-    getDefaultSubscriptionAdminCredentials() {
+    getDefaultGroups() {
         return {
-            email: 'subscription_admin@system.local',
-            password: 'sudo_subscription_admin',
-            nick: 'Subscription Admin',
-            permissions: {
-                main: 5 // Admin level
+            subscription_admin: {
+                description: 'Subscription administrators',
+                permissions: ['subscription_management'],
+                system: true
+            },
+            admin: {
+                description: 'System administrators',
+                permissions: ['user_management', 'system_config'],
+                system: true
+            },
+            default: {
+                description: 'Default user group',
+                permissions: ['basic_access'],
+                system: true
             }
         };
     }
 }
 
-module.exports = UserGroupSNL;
+module.exports = GroupSNL;

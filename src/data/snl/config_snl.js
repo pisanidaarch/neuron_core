@@ -1,92 +1,174 @@
 // src/data/snl/config_snl.js
 
+const BaseSNL = require('./base_snl');
+
 /**
- * Config SNL - SNL operations for AI configuration
+ * Config SNL - Generates SNL commands for configuration operations
  */
-class ConfigSNL {
+class ConfigSNL extends BaseSNL {
     constructor() {
-        // Config operations
+        super();
+        this.database = 'config';
+        this.namespace = 'ai';
+        this.entity = 'config';
     }
 
     /**
-     * Get AI config SNL
+     * Get AI configuration
      */
     getAIConfigSNL(aiName) {
-        return `view(structure)\non(main.core.ai_config)`;
+        const path = this.buildPath(this.database, this.namespace, this.entity, aiName);
+        return this.buildSNL('view', 'structure', null, path);
     }
 
     /**
-     * Set AI config SNL
+     * Set AI configuration
      */
-    setAIConfigSNL(aiName, config) {
-        return `set(structure)\nvalues("ai_config", ${JSON.stringify(config)})\non(main.core.ai_config)`;
+    setAIConfigSNL(aiName, configData) {
+        const path = this.buildPath(this.database, this.namespace, this.entity);
+        const values = [aiName, configData];
+        return this.buildSNL('set', 'structure', values, path);
     }
 
     /**
-     * Update AI theme SNL
+     * List all AI configurations
      */
-    updateAIThemeSNL(aiName, theme) {
-        return `set(structure)\nvalues("theme", ${JSON.stringify(theme)})\non(main.core.ai_config)`;
+    listAIConfigsSNL(pattern = '*') {
+        const path = this.buildPath(this.database, this.namespace);
+        return this.buildSNL('list', 'structure', pattern, path);
     }
 
     /**
-     * Update AI behavior SNL
+     * Remove AI configuration
      */
-    updateAIBehaviorSNL(aiName, behavior) {
-        return `set(structure)\nvalues("behavior", ${JSON.stringify(behavior)})\non(main.core.ai_config)`;
+    removeAIConfigSNL(aiName) {
+        const path = this.buildPath(this.database, this.namespace, this.entity);
+        return this.buildSNL('remove', 'structure', aiName, path);
     }
 
     /**
-     * Get behavior override SNL
+     * Get theme configuration
      */
-    getBehaviorOverrideSNL(aiName) {
-        return `view(structure)\non(config.${aiName}.behavior_override)`;
+    getThemeConfigSNL(aiName, themeName) {
+        const path = this.buildPath(this.database, this.namespace, 'themes', `${aiName}_${themeName}`);
+        return this.buildSNL('view', 'structure', null, path);
     }
 
     /**
-     * Set behavior override SNL
+     * Set theme configuration
      */
-    setBehaviorOverrideSNL(aiName, behavior) {
-        return `set(structure)\nvalues("behavior_override", ${JSON.stringify(behavior)})\non(config.${aiName}.behavior_override)`;
+    setThemeConfigSNL(aiName, themeName, themeData) {
+        const path = this.buildPath(this.database, this.namespace, 'themes');
+        const values = [`${aiName}_${themeName}`, themeData];
+        return this.buildSNL('set', 'structure', values, path);
     }
 
     /**
-     * Check if AI config exists
+     * Get behavior configuration
      */
-    checkAIConfigSNL() {
-        return `list(structure)\nvalues("ai_config")\non(main.core)`;
+    getBehaviorConfigSNL(aiName) {
+        const path = this.buildPath(this.database, this.namespace, 'behavior', aiName);
+        return this.buildSNL('view', 'structure', null, path);
     }
 
     /**
-     * Create AI config entity
+     * Set behavior configuration
      */
-    createAIConfigSNL(aiName, config) {
-        return `set(structure)\nvalues("ai_config", ${JSON.stringify(config)})\non(main.core.ai_config)`;
+    setBehaviorConfigSNL(aiName, behaviorData) {
+        const path = this.buildPath(this.database, this.namespace, 'behavior');
+        const values = [aiName, behaviorData];
+        return this.buildSNL('set', 'structure', values, path);
     }
 
     /**
-     * Parse AI config response
+     * Parse AI config from response
      */
     parseAIConfig(response) {
         if (!response || typeof response !== 'object') {
             return null;
         }
 
-        return response;
+        const names = Object.keys(response);
+        if (names.length === 0) {
+            return null;
+        }
+
+        const aiName = names[0];
+        const configData = response[aiName];
+
+        return {
+            aiName,
+            ...configData
+        };
     }
 
     /**
-     * Validate config structure
+     * Parse config list from response
      */
-    validateConfigStructure(config) {
-        const required = ['aiName', 'theme', 'behavior'];
-        const missing = required.filter(field => !config[field]);
+    parseConfigList(response) {
+        if (!response || typeof response !== 'object') {
+            return [];
+        }
 
-        if (missing.length > 0) {
-            throw new Error(`Missing required config fields: ${missing.join(', ')}`);
+        return Object.entries(response).map(([aiName, configData]) => ({
+            aiName,
+            ...configData
+        }));
+    }
+
+    /**
+     * Validate AI config structure
+     */
+    validateConfigStructure(configData) {
+        if (!configData || typeof configData !== 'object') {
+            throw new Error('Config data must be an object');
+        }
+
+        // Validate specific config sections if present
+        if (configData.models) {
+            if (!Array.isArray(configData.models)) {
+                throw new Error('Config models must be an array');
+            }
+            configData.models.forEach(model => {
+                if (!model.name || !model.provider) {
+                    throw new Error('Each model must have name and provider');
+                }
+            });
+        }
+
+        if (configData.limits) {
+            if (typeof configData.limits !== 'object') {
+                throw new Error('Config limits must be an object');
+            }
         }
 
         return true;
+    }
+
+    /**
+     * Default AI configuration
+     */
+    getDefaultAIConfig(aiName) {
+        return {
+            aiName,
+            models: [
+                { name: 'gpt-4', provider: 'openai', enabled: true },
+                { name: 'claude-3', provider: 'anthropic', enabled: true },
+                { name: 'gemini-pro', provider: 'google', enabled: true }
+            ],
+            limits: {
+                maxTokensPerRequest: 4000,
+                maxRequestsPerHour: 100,
+                maxRequestsPerDay: 1000
+            },
+            features: {
+                streaming: true,
+                contextMemory: true,
+                multiModal: false
+            },
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
     }
 }
 

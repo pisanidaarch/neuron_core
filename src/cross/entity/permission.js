@@ -1,242 +1,243 @@
 // src/cross/entity/permission.js
 
 /**
- * Permission entity for NeuronCore security module
+ * Permission Entity - Represents a user permission in the system
+ * Used as DTO between layers
  */
 class Permission {
     constructor(data = {}) {
-        this.user_email = data.user_email || '';
-        this.database = data.database || '';
+        this.email = data.email || null;
+        this.database = data.database || null;
+        this.namespace = data.namespace || null;
+        this.entity = data.entity || null;
         this.level = data.level || 1; // 1=read, 2=write, 3=admin
-        this.granted_by = data.granted_by || '';
-        this.granted_at = data.granted_at || new Date().toISOString();
-        this.expires_at = data.expires_at || null; // Optional expiration
+        this.grantedBy = data.grantedBy || null;
+        this.expiresAt = data.expiresAt || null;
+        this.metadata = data.metadata || {};
+        this.createdAt = data.createdAt || null;
+        this.updatedAt = data.updatedAt || null;
     }
 
     /**
-     * Permission levels enumeration
-     */
-    static LEVELS = {
-        READ: 1,
-        WRITE: 2,
-        ADMIN: 3
-    };
-
-    /**
-     * Permission level names
-     */
-    static LEVEL_NAMES = {
-        1: 'read',
-        2: 'write',
-        3: 'admin'
-    };
-
-    /**
-     * Create permission from NeuronDB response
-     * @param {string} userEmail - User email
-     * @param {string} database - Database name
-     * @param {Object} data - Permission data
-     * @returns {Permission}
-     */
-    static fromNeuronDB(userEmail, database, data) {
-        return new Permission({
-            user_email: userEmail,
-            database: database,
-            level: data.level || data,
-            granted_by: data.granted_by || '',
-            granted_at: data.granted_at || new Date().toISOString(),
-            expires_at: data.expires_at || null
-        });
-    }
-
-    /**
-     * Convert to NeuronDB format
-     * @returns {Object}
-     */
-    toNeuronDB() {
-        const data = {
-            level: this.level,
-            granted_by: this.granted_by,
-            granted_at: this.granted_at
-        };
-
-        if (this.expires_at) {
-            data.expires_at = this.expires_at;
-        }
-
-        return data;
-    }
-
-    /**
-     * Validate permission data
-     * @returns {Object} { valid: boolean, errors: string[] }
+     * Validate permission entity
+     * @returns {string[]} Array of validation errors
      */
     validate() {
         const errors = [];
 
-        if (!this.user_email || !this.user_email.includes('@')) {
-            errors.push('Valid user email is required');
+        if (!this.email) {
+            errors.push('Email is required');
+        } else if (!this.isValidEmail(this.email)) {
+            errors.push('Invalid email format');
         }
 
         if (!this.database) {
-            errors.push('Database name is required');
+            errors.push('Database is required');
+        } else if (typeof this.database !== 'string') {
+            errors.push('Database must be a string');
         }
 
-        if (!Object.values(Permission.LEVELS).includes(this.level)) {
-            errors.push('Permission level must be 1 (read), 2 (write), or 3 (admin)');
+        // Namespace and entity are optional (can be null for database-level permissions)
+        if (this.namespace !== null && typeof this.namespace !== 'string') {
+            errors.push('Namespace must be a string or null');
         }
 
-        if (this.expires_at) {
-            const expiresAt = new Date(this.expires_at);
-            const now = new Date();
-            if (expiresAt <= now) {
-                errors.push('Expiration date must be in the future');
-            }
+        if (this.entity !== null && typeof this.entity !== 'string') {
+            errors.push('Entity must be a string or null');
         }
 
-        return {
-            valid: errors.length === 0,
-            errors
-        };
+        if (!Number.isInteger(this.level) || this.level < 1 || this.level > 3) {
+            errors.push('Level must be 1 (read), 2 (write), or 3 (admin)');
+        }
+
+        if (this.expiresAt !== null && !this.isValidDate(this.expiresAt)) {
+            errors.push('ExpiresAt must be a valid ISO date string or null');
+        }
+
+        return errors;
+    }
+
+    /**
+     * Check if email is valid
+     */
+    isValidEmail(email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+    }
+
+    /**
+     * Check if date is valid ISO string
+     */
+    isValidDate(dateString) {
+        const date = new Date(dateString);
+        return date instanceof Date && !isNaN(date);
+    }
+
+    /**
+     * Get permission scope
+     * @returns {string} Scope identifier
+     */
+    getScope() {
+        const parts = [this.database];
+        if (this.namespace) parts.push(this.namespace);
+        if (this.entity) parts.push(this.entity);
+        return parts.join('.');
     }
 
     /**
      * Check if permission is expired
-     * @returns {boolean}
      */
     isExpired() {
-        if (!this.expires_at) return false;
-
-        const expiresAt = new Date(this.expires_at);
-        const now = new Date();
-        return now >= expiresAt;
+        if (!this.expiresAt) return false;
+        return new Date(this.expiresAt) < new Date();
     }
 
     /**
-     * Check if permission is active (not expired)
-     * @returns {boolean}
+     * Check if permission is active
      */
     isActive() {
         return !this.isExpired();
     }
 
     /**
-     * Check if permission allows specific level
-     * @param {number} requiredLevel - Required permission level
+     * Check if permission allows operation
+     * @param {string} operation - Operation to check (read, write, admin)
      * @returns {boolean}
      */
-    allows(requiredLevel) {
-        return this.isActive() && this.level >= requiredLevel;
+    allowsOperation(operation) {
+        if (this.isExpired()) return false;
+
+        switch (operation.toLowerCase()) {
+            case 'read':
+                return this.level >= 1;
+            case 'write':
+                return this.level >= 2;
+            case 'admin':
+                return this.level >= 3;
+            default:
+                return false;
+        }
     }
 
     /**
-     * Check if permission allows read access
-     * @returns {boolean}
+     * Check if permission has read access
      */
-    allowsRead() {
-        return this.allows(Permission.LEVELS.READ);
+    canRead() {
+        return this.allowsOperation('read');
     }
 
     /**
-     * Check if permission allows write access
-     * @returns {boolean}
+     * Check if permission has write access
      */
-    allowsWrite() {
-        return this.allows(Permission.LEVELS.WRITE);
+    canWrite() {
+        return this.allowsOperation('write');
     }
 
     /**
-     * Check if permission allows admin access
-     * @returns {boolean}
+     * Check if permission has admin access
      */
-    allowsAdmin() {
-        return this.allows(Permission.LEVELS.ADMIN);
+    canAdmin() {
+        return this.allowsOperation('admin');
     }
 
     /**
      * Get permission level name
-     * @returns {string}
      */
     getLevelName() {
-        return Permission.LEVEL_NAMES[this.level] || 'unknown';
+        switch (this.level) {
+            case 1: return 'read';
+            case 2: return 'write';
+            case 3: return 'admin';
+            default: return 'unknown';
+        }
     }
 
     /**
-     * Update permission level
-     * @param {number} newLevel - New permission level
-     * @param {string} grantedBy - Who granted the permission
+     * Convert to JSON
      */
-    updateLevel(newLevel, grantedBy) {
-        this.level = newLevel;
-        this.granted_by = grantedBy;
-        this.granted_at = new Date().toISOString();
+    toJSON() {
+        return {
+            email: this.email,
+            database: this.database,
+            namespace: this.namespace,
+            entity: this.entity,
+            level: this.level,
+            grantedBy: this.grantedBy,
+            expiresAt: this.expiresAt,
+            metadata: { ...this.metadata },
+            createdAt: this.createdAt,
+            updatedAt: this.updatedAt
+        };
     }
 
     /**
-     * Set expiration date
-     * @param {Date} expiresAt - Expiration date
+     * Convert to safe JSON (for display)
      */
-    setExpiration(expiresAt) {
-        this.expires_at = expiresAt ? expiresAt.toISOString() : null;
+    toSafeJSON() {
+        return {
+            ...this.toJSON(),
+            levelName: this.getLevelName(),
+            scope: this.getScope(),
+            active: this.isActive()
+        };
     }
 
     /**
-     * Remove expiration (make permanent)
+     * Create from JSON
      */
-    removePermanent() {
-        this.expires_at = null;
+    static fromJSON(data) {
+        return new Permission(data);
     }
 
     /**
-     * Create permission with specific level
-     * @param {string} userEmail - User email
-     * @param {string} database - Database name
-     * @param {number} level - Permission level
-     * @param {string} grantedBy - Who granted the permission
-     * @returns {Permission}
+     * Clone permission
      */
-    static create(userEmail, database, level, grantedBy) {
-        return new Permission({
-            user_email: userEmail,
-            database: database,
-            level: level,
-            granted_by: grantedBy,
-            granted_at: new Date().toISOString()
-        });
+    clone() {
+        return new Permission(this.toJSON());
     }
 
     /**
-     * Create read permission
-     * @param {string} userEmail - User email
-     * @param {string} database - Database name
-     * @param {string} grantedBy - Who granted the permission
-     * @returns {Permission}
+     * Update permission data
      */
-    static createRead(userEmail, database, grantedBy) {
-        return Permission.create(userEmail, database, Permission.LEVELS.READ, grantedBy);
+    update(data) {
+        if (data.email !== undefined) this.email = data.email;
+        if (data.database !== undefined) this.database = data.database;
+        if (data.namespace !== undefined) this.namespace = data.namespace;
+        if (data.entity !== undefined) this.entity = data.entity;
+        if (data.level !== undefined) this.level = data.level;
+        if (data.grantedBy !== undefined) this.grantedBy = data.grantedBy;
+        if (data.expiresAt !== undefined) this.expiresAt = data.expiresAt;
+        if (data.metadata !== undefined) this.metadata = { ...data.metadata };
+        this.updatedAt = new Date().toISOString();
+        return this;
     }
 
     /**
-     * Create write permission
-     * @param {string} userEmail - User email
-     * @param {string} database - Database name
-     * @param {string} grantedBy - Who granted the permission
-     * @returns {Permission}
+     * Check equality
      */
-    static createWrite(userEmail, database, grantedBy) {
-        return Permission.create(userEmail, database, Permission.LEVELS.WRITE, grantedBy);
+    equals(other) {
+        if (!(other instanceof Permission)) return false;
+        return this.email === other.email &&
+               this.database === other.database &&
+               this.namespace === other.namespace &&
+               this.entity === other.entity;
     }
 
     /**
-     * Create admin permission
-     * @param {string} userEmail - User email
-     * @param {string} database - Database name
-     * @param {string} grantedBy - Who granted the permission
-     * @returns {Permission}
+     * Create permission identifier
      */
-    static createAdmin(userEmail, database, grantedBy) {
-        return Permission.create(userEmail, database, Permission.LEVELS.ADMIN, grantedBy);
+    getId() {
+        return `${this.email}:${this.getScope()}`;
     }
+
+    /**
+     * Permission level constants
+     */
+    static LEVELS = {
+        READ: 1,
+        WRITE: 2,
+        ADMIN: 3
+    };
 }
 
 module.exports = Permission;

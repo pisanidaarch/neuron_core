@@ -1,44 +1,35 @@
 {
   "database": {
-    "config_url": "http://localhost:8080",
-    "config_token": "YOUR_CONFIG_TOKEN_HERE"
+    "config_url": "https://ndb.archoffice.tech",
+    "config_token": "YOUR_CONFIG_DATABASE_TOKEN_HERE"
   },
   "ai_instances": {
     "demo_ai": {
       "name": "demo_ai",
-      "url": "http://localhost:8080",
-      "token": "YOUR_AI_TOKEN_HERE"
+      "url": "https://ndb.archoffice.tech",
+      "token": "YOUR_AI_INSTANCE_TOKEN_HERE"
     },
     "production_ai": {
       "name": "production_ai",
-      "url": "http://localhost:8080",
+      "url": "https://ndb.archoffice.tech",
       "token": "YOUR_PRODUCTION_AI_TOKEN_HERE"
     }
   },
   "security": {
     "jwt_secret": "your_super_secret_jwt_key_change_in_production",
-    "token_expiry": "24h"
+    "token_expiry": "24h",
+    "bcrypt_rounds": 10
   },
   "server": {
     "port": 3000,
-    "cors_origin": "*"
-  },
-  "colors": {
-    "primary": {
-      "black": "#000000",
-      "white": "#FFFFFF",
-      "dark_blue": "#0363AE",
-      "dark_purple": "#50038F"
-    },
-    "secondary": {
-      "purple": "#6332F5",
-      "turquoise": "#54D3EC",
-      "blue": "#2F62CD",
-      "teal": "#3AA3A9"
-    },
-    "gradients": {
-      "primary": "linear-gradient(135deg, #50038F 0%, #0363AE 100%)",
-      "secondary": "linear-gradient(135deg, #6332F5 0%, #54D3EC 100%)"
+    "cors_origin": "*",
+    "rate_limit": {
+      "windowMs": 900000,
+      "max": 100
     }
+  },
+  "logging": {
+    "level": "info",
+    "format": "combined"
   }
 }

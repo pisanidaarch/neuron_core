@@ -1,105 +1,158 @@
 // src/data/snl/command_snl.js
 
+const BaseSNL = require('./base_snl');
+
 /**
- * Command SNL - SNL operations for command management
+ * Command SNL - Generates SNL commands for command/workflow operations
  */
-class CommandSNL {
+class CommandSNL extends BaseSNL {
     constructor() {
-        // SNL commands for command CRUD operations
+        super();
+        this.defaultDatabase = 'user-data';
+        this.entity = 'commands';
     }
 
     /**
-     * Create command SNL
-     */
-    createCommandSNL(database, namespace, commandId, command) {
-        return `set(structure)\nvalues("${commandId}", ${JSON.stringify(command)})\non(${database}.${namespace}.commands)`;
-    }
-
-    /**
-     * Get command SNL
+     * Get command by ID - CORRECTED: using view instead of one
      */
     getCommandSNL(database, namespace, commandId) {
-        return `one(structure, id)\nvalues("${commandId}")\non(${database}.${namespace}.commands)`;
+        const path = this.buildPath(database, namespace, this.entity, commandId);
+        return this.buildSNL('view', 'structure', null, path);
     }
 
     /**
-     * List commands SNL
+     * Create or update command
+     */
+    setCommandSNL(database, namespace, commandId, commandData) {
+        const path = this.buildPath(database, namespace, this.entity);
+        const values = [commandId, commandData];
+        return this.buildSNL('set', 'structure', values, path);
+    }
+
+    /**
+     * List commands in namespace
      */
     listCommandsSNL(database, namespace, pattern = '*') {
-        return `list(structure)\nvalues("${pattern}")\non(${database}.${namespace})`;
+        const path = this.buildPath(database, namespace);
+        return this.buildSNL('list', 'structure', pattern, path);
     }
 
     /**
-     * Update command SNL
-     */
-    updateCommandSNL(database, namespace, commandId, command) {
-        return `set(structure)\nvalues("${commandId}", ${JSON.stringify(command)})\non(${database}.${namespace}.commands)`;
-    }
-
-    /**
-     * Delete command SNL
-     */
-    deleteCommandSNL(database, namespace, commandId) {
-        return `remove(structure)\nvalues("${commandId}")\non(${database}.${namespace}.commands)`;
-    }
-
-    /**
-     * Search commands SNL
+     * Search commands
      */
     searchCommandsSNL(database, namespace, searchTerm) {
-        return `search(structure)\nvalues("${searchTerm}")\non(${database}.${namespace}.commands)`;
+        const path = this.buildPath(database, namespace);
+        return this.buildSNL('search', 'structure', searchTerm, path);
     }
 
     /**
-     * Check if commands entity exists
+     * Remove command
      */
-    checkCommandsEntitySNL(database, namespace) {
-        return `list(structure)\nvalues("commands")\non(${database}.${namespace})`;
+    removeCommandSNL(database, namespace, commandId) {
+        const path = this.buildPath(database, namespace, this.entity);
+        return this.buildSNL('remove', 'structure', commandId, path);
     }
 
     /**
-     * Create commands entity if not exists
+     * Tag command
      */
-    createCommandsEntitySNL(database, namespace) {
-        return `set(structure)\nvalues("commands", {})\non(${database}.${namespace}.commands)`;
+    tagCommandSNL(database, namespace, commandId, tagName) {
+        const path = this.buildPath(database, namespace, this.entity, commandId);
+        return this.buildSNL('tag', 'structure', tagName, path);
     }
 
     /**
-     * Parse command list response
+     * Search commands by tags
      */
-    parseCommandsList(response) {
-        if (!response || typeof response !== 'object') {
-            return [];
-        }
-
-        return Object.keys(response).filter(key => key !== 'commands');
+    matchCommandsByTagSNL(database, namespace, tags) {
+        const path = this.buildPath(database, namespace);
+        const tagList = Array.isArray(tags) ? tags.join(',') : tags;
+        return this.buildSNL('match', 'tag', tagList, path);
     }
 
     /**
-     * Parse command data response
+     * Store command execution result
      */
-    parseCommandData(response) {
+    setCommandResultSNL(database, namespace, commandId, executionId, result) {
+        const resultsPath = this.buildPath(database, namespace, 'command_results', commandId);
+        const values = [executionId, result];
+        return this.buildSNL('set', 'structure', values, resultsPath);
+    }
+
+    /**
+     * Get command execution results
+     */
+    getCommandResultsSNL(database, namespace, commandId) {
+        const resultsPath = this.buildPath(database, namespace, 'command_results', commandId);
+        return this.buildSNL('view', 'structure', null, resultsPath);
+    }
+
+    /**
+     * Parse command from response
+     */
+    parseCommand(response) {
         if (!response || typeof response !== 'object') {
             return null;
         }
 
-        return response;
+        const ids = Object.keys(response);
+        if (ids.length === 0) {
+            return null;
+        }
+
+        const commandId = ids[0];
+        const commandData = response[commandId];
+
+        return {
+            id: commandId,
+            ...commandData
+        };
+    }
+
+    /**
+     * Parse command list from response
+     */
+    parseCommandList(response) {
+        if (!response || typeof response !== 'object') {
+            return [];
+        }
+
+        return Object.entries(response).map(([id, commandData]) => ({
+            id,
+            ...commandData
+        }));
     }
 
     /**
      * Validate command structure
      */
-    validateCommandStructure(command) {
-        const required = ['id', 'name', 'commandType'];
-        const missing = required.filter(field => !command[field]);
+    validateCommandData(commandData) {
+        const required = ['type', 'name'];
+        const missing = required.filter(field => !commandData[field]);
 
         if (missing.length > 0) {
-            throw new Error(`Missing required fields: ${missing.join(', ')}`);
+            throw new Error(`Missing required command fields: ${missing.join(', ')}`);
+        }
+
+        // Validate command type
+        const validTypes = [
+            'root', 'frontend', 'database', 'script',
+            'ai', 'if', 'timer', 'goto', 'alert', 'cancel'
+        ];
+
+        if (!validTypes.includes(commandData.type)) {
+            throw new Error(`Invalid command type: ${commandData.type}`);
         }
 
         return true;
     }
+
+    /**
+     * Build default namespace for user
+     */
+    getUserCommandNamespace(userEmail) {
+        return this.formatEmailForNamespace(userEmail);
+    }
 }
 
 module.exports = CommandSNL;
-

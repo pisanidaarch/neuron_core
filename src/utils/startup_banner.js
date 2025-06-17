@@ -1,5 +1,7 @@
 // src/utils/startup_banner.js
 
+const packageJson = require('../../package.json');
+
 /**
  * Startup Banner and System Info
  */
@@ -9,7 +11,7 @@ class StartupBanner {
      */
     static display() {
         console.log('\n🧠 ===============================================');
-        console.log('   ███╗   ██╗███████╗██╗   ██╗██████╗  ██████╗ ███╗   ██╗');
+        console.log('   ███╗   ██╗███████╗██╗   ██╗██████╗  ██████╗ ███╗   ██║');
         console.log('   ████╗  ██║██╔════╝██║   ██║██╔══██╗██╔═══██╗████╗  ██║');
         console.log('   ██╔██╗ ██║█████╗  ██║   ██║██████╔╝██║   ██║██╔██╗ ██║');
         console.log('   ██║╚██╗██║██╔══╝  ██║   ██║██╔══██╗██║   ██║██║╚██╗██║');
@@ -25,6 +27,7 @@ class StartupBanner {
         console.log('   🔒 Enterprise Security & Authentication');
         console.log('   🔄 Advanced Workflow Management');
         console.log('   📊 Timeline & Analytics');
+        console.log(`   📦 Version: ${packageJson.version}`);
         console.log('   ===============================================\n');
     }
 
@@ -70,14 +73,14 @@ class StartupBanner {
         if (keysVO) {
             const validation = keysVO.validate();
 
-            if (validation.valid) {
+            if (validation.length === 0) {
                 console.log('   ✅ Configuration is valid');
                 console.log(`   🔗 Config URL: ${keysVO.getConfigUrl()}`);
                 console.log(`   🤖 AI Instances: ${keysVO.getAINames().join(', ')}`);
                 console.log(`   🔐 JWT Secret: ${keysVO.getJWTSecret() ? 'Set' : 'Not set'}`);
             } else {
                 console.log('   ❌ Configuration has errors:');
-                validation.errors.forEach(error => {
+                validation.forEach(error => {
                     console.log(`     - ${error}`);
                 });
             }
@@ -101,15 +104,15 @@ class StartupBanner {
         // Check if using default secrets
         try {
             const config = require('../../config.json');
-            if (config.security?.jwt_secret?.includes('demo')) {
-                warnings.push('Using demo JWT secret - change in production!');
+            if (config.security?.jwt_secret?.includes('production')) {
+                warnings.push('Using default JWT secret - change in production!');
             }
-            if (config.database?.config_token?.includes('demo')) {
+            if (config.database?.config_token?.includes('YOUR_')) {
                 warnings.push('Using demo config token - change to real token!');
             }
             if (config.ai_instances) {
                 Object.values(config.ai_instances).forEach(ai => {
-                    if (ai.token?.includes('demo')) {
+                    if (ai.token?.includes('YOUR_')) {
                         warnings.push(`AI ${ai.name} using demo token - change to real token!`);
                     }
                 });

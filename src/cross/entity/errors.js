@@ -1,199 +1,295 @@
 // src/cross/entity/errors.js
 
 /**
- * Base Error Class
+ * Base NeuronCore Error class
  */
-class BaseError extends Error {
-    constructor(message, statusCode = 500) {
+class NeuronCoreError extends Error {
+    constructor(message, code = 'NEURON_ERROR', statusCode = 500) {
         super(message);
         this.name = this.constructor.name;
+        this.code = code;
         this.statusCode = statusCode;
         this.timestamp = new Date().toISOString();
-        Error.captureStackTrace(this, this.constructor);
-    }
-
-    toJSON() {
-        return {
-            name: this.name,
-            message: this.message,
-            statusCode: this.statusCode,
-            timestamp: this.timestamp
-        };
     }
 }
 
 /**
- * Validation Error - Used when entity validation fails
+ * Configuration related errors
  */
-class ValidationError extends BaseError {
+class ConfigurationError extends NeuronCoreError {
+    constructor(message) {
+        super(message, 'CONFIG_ERROR', 500);
+    }
+}
+
+/**
+ * Authentication related errors
+ */
+class AuthenticationError extends NeuronCoreError {
+    constructor(message) {
+        super(message, 'AUTH_ERROR', 401);
+    }
+}
+
+/**
+ * Authorization related errors
+ */
+class AuthorizationError extends NeuronCoreError {
+    constructor(message) {
+        super(message, 'AUTHZ_ERROR', 403);
+    }
+}
+
+/**
+ * Validation related errors
+ */
+class ValidationError extends NeuronCoreError {
     constructor(message, field = null) {
-        super(message, 400);
+        super(message, 'VALIDATION_ERROR', 400);
         this.field = field;
     }
+}
 
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            field: this.field
-        };
+/**
+ * Database related errors
+ */
+class DatabaseError extends NeuronCoreError {
+    constructor(message, operation = null) {
+        super(message, 'DATABASE_ERROR', 500);
+        this.operation = operation;
     }
 }
 
 /**
- * Not Found Error - Used when resource is not found
+ * AI instance related errors
  */
-class NotFoundError extends BaseError {
+class AIInstanceError extends NeuronCoreError {
+    constructor(message, aiName = null) {
+        super(message, 'AI_INSTANCE_ERROR', 503);
+        this.aiName = aiName;
+    }
+}
+
+/**
+ * SNL command related errors
+ */
+class SNLError extends NeuronCoreError {
+    constructor(message, command = null) {
+        super(message, 'SNL_ERROR', 400);
+        this.command = command;
+    }
+}
+
+/**
+ * Not found errors
+ */
+class NotFoundError extends NeuronCoreError {
     constructor(message, resource = null) {
-        super(message, 404);
+        super(message, 'NOT_FOUND', 404);
         this.resource = resource;
     }
+}
 
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            resource: this.resource
-        };
+/**
+ * Rate limiting errors
+ */
+class RateLimitError extends NeuronCoreError {
+    constructor(message, limit = null) {
+        super(message, 'RATE_LIMIT', 429);
+        this.limit = limit;
     }
 }
 
 /**
- * Authorization Error - Used when user lacks permissions
+ * Error Handler utility class
  */
-class AuthorizationError extends BaseError {
-    constructor(message, requiredPermission = null) {
-        super(message, 403);
-        this.requiredPermission = requiredPermission;
+class ErrorHandler {
+    /**
+     * Express middleware for error handling
+     */
+    static middleware(error, req, res, next) {
+        // If response was already sent, delegate to default Express error handler
+        if (res.headersSent) {
+            return next(error);
+        }
+
+        // Log error details
+        console.error('Error occurred:', {
+            message: error.message,
+            code: error.code,
+            stack: error.stack,
+            url: req.url,
+            method: req.method,
+            ip: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+
+        // Handle known NeuronCore errors
+        if (error instanceof NeuronCoreError) {
+            return res.status(error.statusCode).json({
+                error: true,
+                code: error.code,
+                message: error.message,
+                timestamp: error.timestamp,
+                ...(error.field && { field: error.field }),
+                ...(error.operation && { operation: error.operation }),
+                ...(error.aiName && { aiName: error.aiName }),
+                ...(error.command && { command: error.command }),
+                ...(error.resource && { resource: error.resource }),
+                ...(error.limit && { limit: error.limit })
+            });
+        }
+
+        // Handle validation errors from joi or similar libraries
+        if (error.name === 'ValidationError' && error.details) {
+            return res.status(400).json({
+                error: true,
+                code: 'VALIDATION_ERROR',
+                message: 'Validation failed',
+                details: error.details.map(detail => ({
+                    field: detail.path.join('.'),
+                    message: detail.message
+                }))
+            });
+        }
+
+        // Handle JWT errors
+        if (error.name === 'JsonWebTokenError') {
+            return res.status(401).json({
+                error: true,
+                code: 'INVALID_TOKEN',
+                message: 'Invalid or malformed token'
+            });
+        }
+
+        if (error.name === 'TokenExpiredError') {
+            return res.status(401).json({
+                error: true,
+                code: 'TOKEN_EXPIRED',
+                message: 'Token has expired'
+            });
+        }
+
+        // Handle syntax errors (malformed JSON, etc.)
+        if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
+            return res.status(400).json({
+                error: true,
+                code: 'MALFORMED_JSON',
+                message: 'Request body contains malformed JSON'
+            });
+        }
+
+        // Handle generic errors
+        const isDevelopment = process.env.NODE_ENV === 'development';
+
+        return res.status(500).json({
+            error: true,
+            code: 'INTERNAL_ERROR',
+            message: 'Internal server error',
+            ...(isDevelopment && { stack: error.stack })
+        });
     }
 
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            requiredPermission: this.requiredPermission
-        };
-    }
-}
-
-/**
- * Authentication Error - Used when authentication fails
- */
-class AuthenticationError extends BaseError {
-    constructor(message) {
-        super(message, 401);
-    }
-}
-
-/**
- * Conflict Error - Used when there's a conflict (e.g., duplicate resource)
- */
-class ConflictError extends BaseError {
-    constructor(message, conflictingResource = null) {
-        super(message, 409);
-        this.conflictingResource = conflictingResource;
+    /**
+     * Create and throw a configuration error
+     * @param {string} message - Error message
+     */
+    static configurationError(message) {
+        throw new ConfigurationError(message);
     }
 
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            conflictingResource: this.conflictingResource
-        };
-    }
-}
-
-/**
- * NeuronDB Error - Used for database-specific errors
- */
-class NeuronDBError extends BaseError {
-    constructor(message, operation = null) {
-        super(message, 500);
-        this.operation = operation;
+    /**
+     * Create and throw an authentication error
+     * @param {string} message - Error message
+     */
+    static authenticationError(message) {
+        throw new AuthenticationError(message);
     }
 
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            operation: this.operation
-        };
-    }
-}
-
-/**
- * SNL Error - Used for SNL syntax or execution errors
- */
-class SNLError extends BaseError {
-    constructor(message, snlCommand = null) {
-        super(message, 400);
-        this.snlCommand = snlCommand;
+    /**
+     * Create and throw an authorization error
+     * @param {string} message - Error message
+     */
+    static authorizationError(message) {
+        throw new AuthorizationError(message);
     }
 
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            snlCommand: this.snlCommand
-        };
-    }
-}
-
-/**
- * Configuration Error - Used for configuration issues
- */
-class ConfigurationError extends BaseError {
-    constructor(message, configKey = null) {
-        super(message, 500);
-        this.configKey = configKey;
+    /**
+     * Create and throw a validation error
+     * @param {string} message - Error message
+     * @param {string} field - Field name
+     */
+    static validationError(message, field = null) {
+        throw new ValidationError(message, field);
     }
 
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            configKey: this.configKey
-        };
-    }
-}
-
-/**
- * Rate Limit Error - Used when rate limits are exceeded
- */
-class RateLimitError extends BaseError {
-    constructor(message, retryAfter = null) {
-        super(message, 429);
-        this.retryAfter = retryAfter;
+    /**
+     * Create and throw a database error
+     * @param {string} message - Error message
+     * @param {string} operation - Database operation
+     */
+    static databaseError(message, operation = null) {
+        throw new DatabaseError(message, operation);
     }
 
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            retryAfter: this.retryAfter
-        };
-    }
-}
-
-/**
- * Timeout Error - Used for operation timeouts
- */
-class TimeoutError extends BaseError {
-    constructor(message, operation = null) {
-        super(message, 408);
-        this.operation = operation;
+    /**
+     * Create and throw an AI instance error
+     * @param {string} message - Error message
+     * @param {string} aiName - AI instance name
+     */
+    static aiInstanceError(message, aiName = null) {
+        throw new AIInstanceError(message, aiName);
     }
 
-    toJSON() {
-        return {
-            ...super.toJSON(),
-            operation: this.operation
+    /**
+     * Create and throw an SNL error
+     * @param {string} message - Error message
+     * @param {string} command - SNL command
+     */
+    static snlError(message, command = null) {
+        throw new SNLError(message, command);
+    }
+
+    /**
+     * Create and throw a not found error
+     * @param {string} message - Error message
+     * @param {string} resource - Resource type
+     */
+    static notFoundError(message, resource = null) {
+        throw new NotFoundError(message, resource);
+    }
+
+    /**
+     * Create and throw a rate limit error
+     * @param {string} message - Error message
+     * @param {Object} limit - Rate limit info
+     */
+    static rateLimitError(message, limit = null) {
+        throw new RateLimitError(message, limit);
+    }
+
+    /**
+     * Wrap async functions to catch errors
+     * @param {Function} fn - Async function to wrap
+     * @returns {Function} Wrapped function
+     */
+    static wrapAsync(fn) {
+        return (req, res, next) => {
+            Promise.resolve(fn(req, res, next)).catch(next);
         };
     }
 }
 
 module.exports = {
-    BaseError,
-    ValidationError,
-    NotFoundError,
-    AuthorizationError,
-    AuthenticationError,
-    ConflictError,
-    NeuronDBError,
-    SNLError,
+    NeuronCoreError,
     ConfigurationError,
+    AuthenticationError,
+    AuthorizationError,
+    ValidationError,
+    DatabaseError,
+    AIInstanceError,
+    SNLError,
+    NotFoundError,
     RateLimitError,
-    TimeoutError
+    ErrorHandler
 };

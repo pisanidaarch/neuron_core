@@ -1,374 +1,222 @@
 // src/data/initializer/database_initializer.js
 
 const { getInstance } = require('../manager/keys_vo_manager');
-const AISender = require('../neuron_db/ai_sender');
 const NeuronDBSender = require('../neuron_db/sender');
+const { DatabaseError } = require('../../cross/entity/errors');
 
 /**
- * DatabaseInitializer - Initialize required databases and structures
+ * DatabaseInitializer - Initialize and manage database connections
  */
 class DatabaseInitializer {
     constructor() {
-        this.sender = new NeuronDBSender();
-        this.requiredDatabases = [
-            'timeline',
-            'user-data',
-            'workflow',
-            'workflow-hist'
-        ];
+        this.initialized = false;
+        this.configSender = null;
+        this.aiSenders = new Map();
     }
 
     /**
-     * Initialize all required databases and structures
+     * Initialize all databases
      * @returns {Promise<void>}
      */
     async initializeAll() {
         try {
-            console.log('📦 Starting database initialization...');
+            console.log('🗄️  Initializing databases...');
 
             // Get KeysVO instance
             const keysManager = getInstance();
-            const keysVO = await keysManager.getKeysVO();
+            const keysVO = keysManager.getKeysVO();
 
-            // Initialize config sender
-            this.sender.initialize(keysVO.getConfigUrl(), keysVO.getConfigToken());
-
-            // Test connection first
-            const isConnected = await this.sender.testConnection();
-            if (!isConnected) {
-                console.warn('   ⚠️  NeuronDB not reachable - skipping database initialization');
-                return;
+            if (!keysVO) {
+                throw new DatabaseError('KeysVO not initialized');
             }
 
-            // Initialize for each AI instance
-            for (const aiName of keysVO.getAINames()) {
-                console.log(`   🔧 Initializing databases for AI: ${aiName}`);
-                await this.initializeAI(aiName, keysVO);
-            }
+            // Initialize config database
+            await this.initializeConfigDatabase(keysVO);
 
-            console.log('✅ Database initialization completed successfully');
+            // Initialize AI instance databases
+            await this.initializeAIDatabases(keysVO);
+
+            // Test connections
+            await this.testConnections();
+
+            this.initialized = true;
+            console.log('✅ All databases initialized successfully');
 
         } catch (error) {
             console.error('❌ Database initialization failed:', error);
-            // Don't throw - this is not critical for application startup
-            console.warn('⚠️  Continuing without database initialization');
+            throw new DatabaseError(`Database initialization failed: ${error.message}`);
         }
     }
 
     /**
-     * Initialize databases for specific AI
-     * @param {string} aiName - AI name
-     * @param {Object} keysVO - KeysVO instance
-     * @returns {Promise<void>}
-     */
-    async initializeAI(aiName, keysVO) {
-        try {
-            const aiUrl = keysVO.getAIUrl(aiName);
-            const aiToken = keysVO.getAIToken(aiName);
-
-            if (!aiUrl || !aiToken) {
-                console.warn(`     ⚠️  Skipping AI ${aiName}: missing URL or token`);
-                return;
-            }
-
-            // Create AI sender
-            const aiSender = new AISender();
-            aiSender.initialize(aiUrl, aiToken);
-
-            // Test AI connection
-            const isAiConnected = await aiSender.testConnection();
-            if (!isAiConnected) {
-                console.warn(`     ⚠️  AI ${aiName} not reachable - skipping`);
-                return;
-            }
-
-            // 1. Initialize core databases
-            await this.initializeCoreDatabases(aiSender);
-
-            // 2. Initialize support databases
-            await this.initializeSupportDatabases(aiSender);
-
-            // 3. Initialize workflow databases
-            await this.initializeWorkflowDatabases(aiSender);
-
-            console.log(`     ✅ Databases initialized for AI: ${aiName}`);
-
-        } catch (error) {
-            console.error(`     ❌ Failed to initialize databases for AI ${aiName}:`, error);
-            // Don't throw - continue with other AIs
-        }
-    }
-
-    /**
-     * Initialize core databases
-     * @param {AISender} aiSender - AI sender instance
-     * @returns {Promise<void>}
-     */
-    async initializeCoreDatabases(aiSender) {
-        try {
-            console.log('       📚 Initializing core databases...');
-
-            // Core databases are typically created by NeuronDB itself
-            // We mainly need to ensure they exist and create core namespaces
-
-            // Create core namespace if it doesn't exist
-            await this._ensureNamespaceExists(aiSender, 'main', 'core');
-
-            console.log('       ✅ Core databases initialized');
-
-        } catch (error) {
-            console.error('       ❌ Failed to initialize core databases:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Initialize support databases
-     * @param {AISender} aiSender - AI sender instance
-     * @returns {Promise<void>}
-     */
-    async initializeSupportDatabases(aiSender) {
-        try {
-            console.log('       📋 Initializing support databases...');
-
-            // Initialize timeline database
-            await this._ensureDatabaseExists(aiSender, 'timeline');
-
-            // Initialize user-data database
-            await this._ensureDatabaseExists(aiSender, 'user-data');
-
-            console.log('       ✅ Support databases initialized');
-
-        } catch (error) {
-            console.error('       ❌ Failed to initialize support databases:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Initialize workflow databases
-     * @param {AISender} aiSender - AI sender instance
-     * @returns {Promise<void>}
-     */
-    async initializeWorkflowDatabases(aiSender) {
-        try {
-            console.log('       🔄 Initializing workflow databases...');
-
-            // Initialize workflow database
-            await this._ensureDatabaseExists(aiSender, 'workflow');
-
-            // Initialize workflow history database
-            await this._ensureDatabaseExists(aiSender, 'workflow-hist');
-
-            console.log('       ✅ Workflow databases initialized');
-
-        } catch (error) {
-            console.error('       ❌ Failed to initialize workflow databases:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Ensure database exists
+     * Initialize config database
+     * @param {KeysVO} keysVO - Keys value object
      * @private
      */
-    async _ensureDatabaseExists(aiSender, databaseName) {
+    async initializeConfigDatabase(keysVO) {
+        const configUrl = keysVO.getConfigUrl();
+        const configToken = keysVO.getConfigToken();
+
+        if (!configUrl || !configToken) {
+            throw new DatabaseError('Config database credentials not found');
+        }
+
+        console.log('   📡 Initializing config database...');
+
+        this.configSender = new NeuronDBSender();
+        this.configSender.initialize(configUrl, configToken);
+
+        // Test config database connection
         try {
-            // Try to list databases to check if it exists
-            const listSNL = `list(database)\nvalues("${databaseName}")\non()`;
-            const result = await aiSender.executeSNL(listSNL);
-
-            // If database doesn't exist in the list, create it
-            if (!result || Object.keys(result).length === 0) {
-                console.log(`         📝 Creating database: ${databaseName}`);
-                await aiSender.createDatabase(databaseName);
-                console.log(`         ✅ Database created: ${databaseName}`);
-            } else {
-                console.log(`         ✓ Database exists: ${databaseName}`);
-            }
-
+            await this.configSender.testConnection();
+            console.log('   ✅ Config database connected');
         } catch (error) {
-            if (error.message && error.message.includes('not found')) {
-                // Database doesn't exist, try to create it
-                try {
-                    console.log(`         📝 Creating database: ${databaseName}`);
-                    await aiSender.createDatabase(databaseName);
-                    console.log(`         ✅ Database created: ${databaseName}`);
-                } catch (createError) {
-                    console.error(`         ❌ Failed to create database ${databaseName}:`, createError.message);
+            throw new DatabaseError(`Config database connection failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Initialize AI instance databases
+     * @param {KeysVO} keysVO - Keys value object
+     * @private
+     */
+    async initializeAIDatabases(keysVO) {
+        const aiNames = keysVO.getAINames();
+
+        console.log(`   🤖 Initializing ${aiNames.length} AI databases...`);
+
+        for (const aiName of aiNames) {
+            try {
+                const aiUrl = keysVO.getAIUrl(aiName);
+                const aiToken = keysVO.getAIToken(aiName);
+
+                if (!aiUrl || !aiToken) {
+                    console.warn(`   ⚠️  Skipping AI ${aiName}: missing credentials`);
+                    continue;
                 }
-            } else {
-                console.error(`         ❌ Error checking database ${databaseName}:`, error.message);
+
+                const aiSender = new NeuronDBSender();
+                aiSender.initialize(aiUrl, aiToken);
+
+                // Test AI database connection
+                await aiSender.testConnection();
+
+                this.aiSenders.set(aiName, aiSender);
+                console.log(`   ✅ AI database connected: ${aiName}`);
+
+            } catch (error) {
+                console.warn(`   ⚠️  AI database connection failed for ${aiName}: ${error.message}`);
+                // Don't throw error for individual AI instances
             }
         }
     }
 
     /**
-     * Ensure namespace exists
+     * Test all database connections
      * @private
      */
-    async _ensureNamespaceExists(aiSender, databaseName, namespaceName) {
-        try {
-            // Try to list namespaces to check if it exists
-            const listSNL = `list(namespace)\nvalues("${namespaceName}")\non(${databaseName})`;
-            const result = await aiSender.executeSNL(listSNL);
+    async testConnections() {
+        console.log('   🔍 Testing database connections...');
 
-            // If namespace doesn't exist in the list, create it
-            if (!result || Object.keys(result).length === 0) {
-                console.log(`         📁 Creating namespace: ${databaseName}.${namespaceName}`);
-                await aiSender.createNamespace(databaseName, namespaceName);
-                console.log(`         ✅ Namespace created: ${databaseName}.${namespaceName}`);
-            } else {
-                console.log(`         ✓ Namespace exists: ${databaseName}.${namespaceName}`);
+        // Test config database
+        if (this.configSender) {
+            try {
+                await this.configSender.testConnection();
+                console.log('   ✅ Config database: OK');
+            } catch (error) {
+                throw new DatabaseError(`Config database test failed: ${error.message}`);
             }
+        }
 
-        } catch (error) {
-            if (error.message && error.message.includes('not found')) {
-                // Namespace doesn't exist, try to create it
-                try {
-                    console.log(`         📁 Creating namespace: ${databaseName}.${namespaceName}`);
-                    await aiSender.createNamespace(databaseName, namespaceName);
-                    console.log(`         ✅ Namespace created: ${databaseName}.${namespaceName}`);
-                } catch (createError) {
-                    console.error(`         ❌ Failed to create namespace ${databaseName}.${namespaceName}:`, createError.message);
-                }
-            } else {
-                console.error(`         ❌ Error checking namespace ${databaseName}.${namespaceName}:`, error.message);
+        // Test AI databases
+        for (const [aiName, sender] of this.aiSenders) {
+            try {
+                await sender.testConnection();
+                console.log(`   ✅ AI database ${aiName}: OK`);
+            } catch (error) {
+                console.warn(`   ⚠️  AI database ${aiName}: ${error.message}`);
             }
         }
     }
 
     /**
-     * Initialize user-specific namespaces
-     * @param {string} aiName - AI name
-     * @param {string} userEmail - User email
-     * @returns {Promise<void>}
+     * Get config database sender
+     * @returns {NeuronDBSender|null}
      */
-    async initializeUserNamespaces(aiName, userEmail) {
-        try {
-            console.log(`   👤 Initializing user namespaces for ${userEmail} in AI: ${aiName}`);
-
-            // Get AI configuration
-            const keysManager = getInstance();
-            const keysVO = await keysManager.getKeysVO();
-
-            const aiUrl = keysVO.getAIUrl(aiName);
-            const aiToken = keysVO.getAIToken(aiName);
-
-            if (!aiUrl || !aiToken) {
-                throw new Error(`AI ${aiName} not configured`);
-            }
-
-            // Create AI sender
-            const aiSender = new AISender();
-            aiSender.initialize(aiUrl, aiToken);
-
-            // Generate namespace name from email
-            const namespaceName = this._generateNamespaceFromEmail(userEmail);
-
-            // Create user namespaces in support databases
-            await this._ensureNamespaceExists(aiSender, 'timeline', namespaceName);
-            await this._ensureNamespaceExists(aiSender, 'user-data', namespaceName);
-
-            console.log(`   ✅ User namespaces initialized for ${userEmail}`);
-
-        } catch (error) {
-            console.error(`   ❌ Failed to initialize user namespaces for ${userEmail}:`, error);
-            // Don't throw - this shouldn't block user operations
-        }
+    getConfigSender() {
+        return this.configSender;
     }
 
     /**
-     * Generate namespace name from email
-     * @private
+     * Get AI database sender
+     * @param {string} aiName - AI instance name
+     * @returns {NeuronDBSender|null}
      */
-    _generateNamespaceFromEmail(email) {
-        return email.replace('@', '_').replace(/\./g, '_').toLowerCase();
+    getAISender(aiName) {
+        return this.aiSenders.get(aiName);
     }
 
     /**
-     * Get database status
-     * @returns {Promise<Object>} Database status
+     * Get all AI sender names
+     * @returns {Array<string>}
      */
-    async getDatabaseStatus() {
+    getAISenderNames() {
+        return Array.from(this.aiSenders.keys());
+    }
+
+    /**
+     * Check if initialized
+     * @returns {boolean}
+     */
+    isInitialized() {
+        return this.initialized;
+    }
+
+    /**
+     * Get initialization status
+     * @returns {Object}
+     */
+    async getStatus() {
         try {
-            const keysManager = getInstance();
-            const keysVO = await keysManager.getKeysVO();
-
-            // Initialize config sender
-            this.sender.initialize(keysVO.getConfigUrl(), keysVO.getConfigToken());
-
             const status = {
-                connected: false,
-                databases: {},
-                aiInstances: {}
+                initialized: this.initialized,
+                configDatabase: {
+                    connected: false,
+                    error: null
+                },
+                aiDatabases: {}
             };
 
-            // Test config connection
-            status.connected = await this.sender.testConnection();
-
-            if (status.connected) {
-                // Check each required database
-                for (const dbName of this.requiredDatabases) {
-                    try {
-                        const listSNL = `list(database)\nvalues("${dbName}")\non()`;
-                        const result = await this.sender.executeSNL(listSNL);
-                        status.databases[dbName] = {
-                            exists: !!(result && Object.keys(result).length > 0),
-                            lastChecked: new Date().toISOString()
-                        };
-                    } catch (error) {
-                        status.databases[dbName] = {
-                            exists: false,
-                            error: error.message,
-                            lastChecked: new Date().toISOString()
-                        };
-                    }
+            // Check config database
+            if (this.configSender) {
+                try {
+                    await this.configSender.testConnection();
+                    status.configDatabase.connected = true;
+                } catch (error) {
+                    status.configDatabase.error = error.message;
                 }
+            }
 
-                // Check AI instances
-                for (const aiName of keysVO.getAINames()) {
-                    try {
-                        const aiUrl = keysVO.getAIUrl(aiName);
-                        const aiToken = keysVO.getAIToken(aiName);
-
-                        if (aiUrl && aiToken) {
-                            const aiSender = new AISender();
-                            aiSender.initialize(aiUrl, aiToken);
-
-                            status.aiInstances[aiName] = {
-                                connected: await aiSender.testConnection(),
-                                url: aiUrl,
-                                hasToken: !!aiToken,
-                                lastChecked: new Date().toISOString()
-                            };
-                        } else {
-                            status.aiInstances[aiName] = {
-                                connected: false,
-                                error: 'Missing URL or token',
-                                lastChecked: new Date().toISOString()
-                            };
-                        }
-                    } catch (error) {
-                        status.aiInstances[aiName] = {
-                            connected: false,
-                            error: error.message,
-                            lastChecked: new Date().toISOString()
-                        };
-                    }
+            // Check AI databases
+            for (const [aiName, sender] of this.aiSenders) {
+                try {
+                    await sender.testConnection();
+                    status.aiDatabases[aiName] = {
+                        connected: true,
+                        error: null
+                    };
+                } catch (error) {
+                    status.aiDatabases[aiName] = {
+                        connected: false,
+                        error: error.message
+                    };
                 }
             }
 
             return status;
 
         } catch (error) {
-            console.error('Failed to get database status:', error);
-            return {
-                connected: false,
-                error: error.message,
-                databases: {},
-                aiInstances: {}
-            };
+            throw new DatabaseError(`Failed to get database status: ${error.message}`);
         }
     }
 
@@ -379,13 +227,42 @@ class DatabaseInitializer {
     async reinitializeAll() {
         try {
             console.log('🔄 Reinitializing all databases...');
+            this.initialized = false;
+            this.configSender = null;
+            this.aiSenders.clear();
+
             await this.initializeAll();
             console.log('✅ Database reinitialization completed');
 
         } catch (error) {
             console.error('❌ Database reinitialization failed:', error);
-            throw error;
+            throw new DatabaseError(`Database reinitialization failed: ${error.message}`);
         }
+    }
+
+    /**
+     * Close all connections
+     */
+    async close() {
+        console.log('📴 Closing database connections...');
+
+        // Close config sender
+        if (this.configSender && typeof this.configSender.close === 'function') {
+            await this.configSender.close();
+        }
+
+        // Close AI senders
+        for (const [aiName, sender] of this.aiSenders) {
+            if (typeof sender.close === 'function') {
+                await sender.close();
+            }
+        }
+
+        this.initialized = false;
+        this.configSender = null;
+        this.aiSenders.clear();
+
+        console.log('✅ All database connections closed');
     }
 }
 

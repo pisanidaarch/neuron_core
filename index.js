@@ -58,24 +58,45 @@ class NeuronCore {
     }
 
     /**
-     * Initialize KeysVO singleton
-     * @private
-     */
+    * Initialize KeysVO singleton
+    * @private
+    */
     async _initializeKeysVO() {
         try {
             console.log('   🔑 Initializing KeysVO...');
 
             // Use KeysVOManager to properly initialize from config file
-            const { initialize } = require('./src/data/manager/keys_vo_manager');
+            const { initialize, getInstance } = require('./src/data/manager/keys_vo_manager');
             const keysVO = await initialize();
+
+            // Set the refresh callback to reload tokens from database
+            const manager = getInstance();
+            keysVO.setRefreshCallback(async () => {
+                await manager.refreshAITokens();
+            });
 
             // Validate that we have necessary keys
             const validation = keysVO.validate();
             if (!validation.valid) {
-                throw new Error(`KeysVO validation failed: ${validation.errors.join(', ')}`);
+                // Don't fail if only AI instances are missing - they'll be loaded from DB
+                const criticalErrors = validation.errors.filter(e =>
+                    !e.includes('AI instances configured')
+                );
+                if (criticalErrors.length > 0) {
+                    throw new Error(`KeysVO validation failed: ${criticalErrors.join(', ')}`);
+                }
             }
 
             console.log('   ✅ KeysVO initialized successfully');
+
+            // Log loaded AI instances for debugging
+            const info = keysVO.getInfo();
+            if (info.aiInstances.length > 0) {
+                console.log(`   📡 Loaded ${info.aiInstances.length} AI instances:`);
+                info.aiInstances.forEach(ai => {
+                    console.log(`      - ${ai.name}: ${ai.url} (token: ${ai.hasToken ? '✓' : '✗'})`);
+                });
+            }
 
         } catch (error) {
             console.error('   ❌ Failed to initialize KeysVO:', error);

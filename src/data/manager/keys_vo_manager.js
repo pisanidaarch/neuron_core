@@ -1,27 +1,30 @@
 // src/data/manager/keys_vo_manager.js
 
 const KeysVO = require('../../cross/entity/keys_vo');
+const NeuronDBSender = require('../neuron_db/sender');
 const fs = require('fs').promises;
 const path = require('path');
 
 /**
  * KeysVOManager - Manages KeysVO initialization and updates
+ * Now fetches AI tokens dynamically from config database
  */
 class KeysVOManager {
     constructor() {
         this.configPath = path.join(process.cwd(), 'config.json');
         this.keysVO = null;
+        this.configSender = new NeuronDBSender();
     }
 
     /**
-     * Initialize KeysVO from config file
+     * Initialize KeysVO from config file and fetch AI tokens from database
      * @returns {Promise<KeysVO>}
      */
     async initialize() {
         try {
             console.log('Initializing KeysVO from config...');
 
-            // Read config file
+            // Read config file for basic configuration
             const configData = await this.loadConfig();
 
             // Validate config first
@@ -33,8 +36,17 @@ class KeysVOManager {
             // Create or get KeysVO instance
             this.keysVO = await KeysVO.getInstance();
 
-            // Update with config data
+            // Update with config data (config URL and token)
             await this.updateFromConfig(configData);
+
+            // Initialize config sender
+            this.configSender.initialize(
+                configData.database.config_url,
+                configData.database.config_token
+            );
+
+            // Fetch AI tokens from database
+            await this.loadAITokensFromDatabase();
 
             console.log('✅ KeysVO initialized successfully');
             return this.keysVO;
@@ -42,6 +54,63 @@ class KeysVOManager {
         } catch (error) {
             console.error('❌ Failed to initialize KeysVO:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Load AI tokens from config database
+     * @returns {Promise<void>}
+     */
+    async loadAITokensFromDatabase() {
+        try {
+            console.log('   📡 Fetching AI tokens from config database...');
+
+            // Execute SNL to get AI configurations
+            const snl = 'view(structure)\non(config.general.ai)';
+            const response = await this.configSender.executeSNL(snl);
+
+            if (!response || typeof response !== 'object') {
+                console.warn('   ⚠️  No AI configurations found in database');
+                return;
+            }
+
+            // Process each AI configuration
+            let aiCount = 0;
+            for (const [aiName, aiData] of Object.entries(response)) {
+                if (aiData && aiData.key) {
+                    // Decode the JWT to get the instance URL
+                    const tokenParts = aiData.key.split('.');
+                    if (tokenParts.length === 3) {
+                        try {
+                            const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString());
+
+                            // Set AI credentials with proper URL
+                            // The URL should come from config or be constructed based on instance
+                            const aiUrl = this.keysVO.getConfigUrl(); // Default to config URL
+
+                            this.keysVO.setAICredentials(
+                                aiName,
+                                aiUrl,
+                                aiData.key
+                            );
+
+                            console.log(`   ✅ Loaded token for AI: ${aiName} (level: ${payload.level}, instance: ${payload.instance})`);
+                            aiCount++;
+                        } catch (e) {
+                            console.warn(`   ⚠️  Failed to decode token for AI ${aiName}:`, e.message);
+                        }
+                    }
+                } else {
+                    console.warn(`   ⚠️  No key found for AI: ${aiName}`);
+                }
+            }
+
+            console.log(`   ✅ Loaded ${aiCount} AI tokens from database`);
+
+        } catch (error) {
+            console.error('   ❌ Failed to load AI tokens from database:', error);
+            // Don't throw - use fallback tokens from config if database fetch fails
+            console.warn('   ⚠️  Using fallback AI tokens from config.json');
         }
     }
 
@@ -79,7 +148,8 @@ class KeysVOManager {
             );
         }
 
-        // Set AI instances
+        // Set AI instances from config as fallback
+        // These will be overridden by database values if available
         if (config.ai_instances) {
             for (const [aiName, aiConfig] of Object.entries(config.ai_instances)) {
                 this.keysVO.setAICredentials(
@@ -108,13 +178,23 @@ class KeysVOManager {
     }
 
     /**
-     * Reload configuration
+     * Reload configuration and refresh AI tokens
      * @returns {Promise<void>}
      */
     async reload() {
         const configData = await this.loadConfig();
         await this.updateFromConfig(configData);
+        await this.loadAITokensFromDatabase();
         console.log('✅ Configuration reloaded');
+    }
+
+    /**
+     * Refresh only AI tokens from database
+     * @returns {Promise<void>}
+     */
+    async refreshAITokens() {
+        await this.loadAITokensFromDatabase();
+        await this.keysVO.refresh();
     }
 
     /**
@@ -136,9 +216,9 @@ class KeysVOManager {
             }
         }
 
-        if (!config.ai_instances || Object.keys(config.ai_instances).length === 0) {
-            errors.push('At least one AI instance configuration is required');
-        } else {
+        // AI instances are now optional in config (will be loaded from database)
+        // But we can still validate if they exist
+        if (config.ai_instances) {
             for (const [aiName, aiConfig] of Object.entries(config.ai_instances)) {
                 if (!aiConfig.name) {
                     errors.push(`AI instance ${aiName} is missing name`);
@@ -146,9 +226,7 @@ class KeysVOManager {
                 if (!aiConfig.url) {
                     errors.push(`AI instance ${aiName} is missing url`);
                 }
-                if (!aiConfig.token) {
-                    errors.push(`AI instance ${aiName} is missing token`);
-                }
+                // Token is optional as it will be fetched from database
             }
         }
 

@@ -1,9 +1,9 @@
 // src/cross/entity/keys_vo.js
 
-
 /**
  * KeysVO - Value Object for managing all system keys and tokens
  * Implements singleton pattern with lazy loading
+ * Now supports dynamic refresh from database
  */
 class KeysVO {
     constructor() {
@@ -18,6 +18,7 @@ class KeysVO {
         this.tokenExpiry = '24h';
         this.lastRefresh = null;
         this.refreshTimeout = 60 * 60 * 1000; // 1 hour
+        this.refreshCallback = null; // Callback for dynamic refresh
 
         KeysVO.instance = this;
     }
@@ -42,6 +43,14 @@ class KeysVO {
     }
 
     /**
+     * Set refresh callback for dynamic token loading
+     * @param {Function} callback - Async function to refresh tokens
+     */
+    setRefreshCallback(callback) {
+        this.refreshCallback = callback;
+    }
+
+    /**
      * Set config database credentials
      * @param {string} url - Config database URL
      * @param {string} token - Config database token
@@ -62,7 +71,8 @@ class KeysVO {
         this.aiInstances.set(aiName, {
             name: aiName,
             url: url,
-            token: token
+            token: token,
+            lastUpdated: Date.now()
         });
         this.lastRefresh = Date.now();
     }
@@ -162,13 +172,31 @@ class KeysVO {
     }
 
     /**
-     * Refresh instance (can be overridden for dynamic loading)
+     * Refresh instance - reload tokens from database
      * @returns {Promise<void>}
      */
     async refresh() {
-        // This method can be overridden by a manager to reload from external source
-        this.lastRefresh = Date.now();
-        console.log('🔄 KeysVO refreshed');
+        try {
+            // If a refresh callback is set, use it
+            if (this.refreshCallback && typeof this.refreshCallback === 'function') {
+                await this.refreshCallback();
+            }
+
+            this.lastRefresh = Date.now();
+            console.log('🔄 KeysVO refreshed');
+        } catch (error) {
+            console.error('❌ Failed to refresh KeysVO:', error);
+            // Don't throw - keep using cached values
+        }
+    }
+
+    /**
+     * Force refresh - bypass timeout check
+     * @returns {Promise<void>}
+     */
+    async forceRefresh() {
+        this.lastRefresh = 0; // Reset to force refresh
+        await this.refresh();
     }
 
     /**
@@ -186,8 +214,9 @@ class KeysVO {
             errors.push('Config URL is not set');
         }
 
+        // AI instances are now optional as they can be loaded dynamically
         if (this.aiInstances.size === 0) {
-            errors.push('No AI instances configured');
+            console.warn('⚠️  No AI instances configured - will be loaded from database');
         }
 
         if (!this.jwtSecret) {
@@ -201,6 +230,27 @@ class KeysVO {
     }
 
     /**
+     * Get instance info for debugging
+     * @returns {Object}
+     */
+    getInfo() {
+        return {
+            configUrl: this.configUrl,
+            hasConfigToken: !!this.configToken,
+            aiInstances: Array.from(this.aiInstances.entries()).map(([name, data]) => ({
+                name,
+                url: data.url,
+                hasToken: !!data.token,
+                lastUpdated: data.lastUpdated
+            })),
+            hasJWTSecret: !!this.jwtSecret,
+            tokenExpiry: this.tokenExpiry,
+            lastRefresh: this.lastRefresh,
+            refreshTimeout: this.refreshTimeout
+        };
+    }
+
+    /**
      * Clear all data (useful for testing)
      */
     clear() {
@@ -210,6 +260,7 @@ class KeysVO {
         this.jwtSecret = null;
         this.tokenExpiry = '24h';
         this.lastRefresh = null;
+        this.refreshCallback = null;
     }
 
     /**

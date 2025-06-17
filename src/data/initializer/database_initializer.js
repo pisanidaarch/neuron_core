@@ -389,4 +389,4 @@ class DatabaseInitializer {
     }
 }
 
-module.exports = DatabaseInitializer;src/api/support/routes.js
+module.exports = DatabaseInitializer;

@@ -1,59 +1,262 @@
 // src/api/support/routes.js
 
 const express = require('express');
-const CommandController = require('./controllers/command_controller');
-const DatabaseController = require('./controllers/database_controller');
-const NamespaceController = require('./controllers/namespace_controller');
-const TagController = require('./controllers/tag_controller');
-const TimelineController = require('./controllers/timeline_controller');
-const ConfigController = require('./controllers/config_controller');
 const { ErrorHandler } = require('../../cross/entity/errors');
 
 const router = express.Router();
 
-// Initialize controllers
-const commandController = new CommandController();
-const databaseController = new DatabaseController();
-const namespaceController = new NamespaceController();
-const tagController = new TagController();
-const timelineController = new TimelineController();
-const configController = new ConfigController();
+/**
+ * Support API Routes (Basic Implementation)
+ *
+ * All routes are prefixed with /api/support
+ * AI-specific routes include {aiName} parameter
+ */
 
-// Command routes
-router.post('/:aiName/commands', ErrorHandler.asyncWrapper(commandController.createCommand.bind(commandController)));
-router.get('/:aiName/commands', ErrorHandler.asyncWrapper(commandController.listCommands.bind(commandController)));
-router.get('/:aiName/commands/:commandId', ErrorHandler.asyncWrapper(commandController.getCommand.bind(commandController)));
-router.put('/:aiName/commands/:commandId', ErrorHandler.asyncWrapper(commandController.updateCommand.bind(commandController)));
-router.delete('/:aiName/commands/:commandId', ErrorHandler.asyncWrapper(commandController.deleteCommand.bind(commandController)));
-router.post('/:aiName/commands/search', ErrorHandler.asyncWrapper(commandController.searchCommands.bind(commandController)));
+// ==================== INFO ROUTES ====================
 
-// Database routes (admin only)
-router.post('/:aiName/database', ErrorHandler.asyncWrapper(databaseController.createDatabase.bind(databaseController)));
-router.delete('/:aiName/database/:databaseName', ErrorHandler.asyncWrapper(databaseController.deleteDatabase.bind(databaseController)));
-router.get('/:aiName/database', ErrorHandler.asyncWrapper(databaseController.listDatabases.bind(databaseController)));
+/**
+ * @route GET /api/support/info
+ * @desc Get support module information
+ * @access Public
+ */
+router.get('/info', (req, res) => {
+    res.json({
+        error: false,
+        message: 'NeuronCore Support API',
+        data: {
+            module: 'support',
+            version: '1.0.0',
+            description: 'Support functionality for NeuronCore',
+            status: 'basic_implementation',
+            features: [
+                'Timeline Management',
+                'Command System',
+                'Configuration Management',
+                'Tag System',
+                'Database Operations',
+                'SNL Execution'
+            ],
+            endpoints: {
+                info: [
+                    'GET /info',
+                    'GET /health'
+                ],
+                timeline: [
+                    'POST /{aiName}/timeline/record (TODO)',
+                    'GET /{aiName}/timeline (TODO)',
+                    'GET /{aiName}/timeline/search (TODO)'
+                ],
+                config: [
+                    'GET /{aiName}/config (TODO)',
+                    'PUT /{aiName}/config/theme (TODO)'
+                ],
+                commands: [
+                    'POST /{aiName}/commands (TODO)',
+                    'GET /{aiName}/commands (TODO)',
+                    'POST /{aiName}/commands/execute (TODO)'
+                ],
+                snl: [
+                    'POST /{aiName}/snl (TODO)'
+                ]
+            },
+            note: 'Support module is currently in basic implementation phase. Full functionality coming soon.'
+        }
+    });
+});
 
-// Namespace routes
-router.post('/:aiName/namespace', ErrorHandler.asyncWrapper(namespaceController.createNamespace.bind(namespaceController)));
-router.delete('/:aiName/namespace/:database/:namespace', ErrorHandler.asyncWrapper(namespaceController.deleteNamespace.bind(namespaceController)));
-router.get('/:aiName/namespace/:database', ErrorHandler.asyncWrapper(namespaceController.listNamespaces.bind(namespaceController)));
+/**
+ * @route GET /api/support/health
+ * @desc Support module health check
+ * @access Public
+ */
+router.get('/health', (req, res) => {
+    res.json({
+        error: false,
+        message: 'Support module is healthy',
+        data: {
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            implementation: 'basic'
+        }
+    });
+});
 
-// Tag routes
-router.post('/:aiName/tags', ErrorHandler.asyncWrapper(tagController.addTag.bind(tagController)));
-router.delete('/:aiName/tags', ErrorHandler.asyncWrapper(tagController.removeTag.bind(tagController)));
-router.get('/:aiName/tags', ErrorHandler.asyncWrapper(tagController.listTags.bind(tagController)));
+// ==================== PLACEHOLDER ROUTES ====================
 
-// Timeline routes
-router.get('/:aiName/timeline', ErrorHandler.asyncWrapper(timelineController.getTimeline.bind(timelineController)));
-router.post('/:aiName/timeline/search', ErrorHandler.asyncWrapper(timelineController.searchTimeline.bind(timelineController)));
+/**
+ * Timeline routes (TODO: Implement)
+ */
+router.post('/:aiName/timeline/record', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Timeline recording not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'timeline/record',
+            status: 'todo'
+        }
+    });
+});
 
-// Config routes
-router.get('/:aiName/config', ErrorHandler.asyncWrapper(configController.getConfig.bind(configController)));
-router.put('/:aiName/config', ErrorHandler.asyncWrapper(configController.updateConfig.bind(configController)));
-router.put('/:aiName/config/colors', ErrorHandler.asyncWrapper(configController.updateColors.bind(configController)));
-router.put('/:aiName/config/logo', ErrorHandler.asyncWrapper(configController.updateLogo.bind(configController)));
-router.put('/:aiName/config/behavior', ErrorHandler.asyncWrapper(configController.updateBehavior.bind(configController)));
+router.get('/:aiName/timeline', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Timeline retrieval not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'timeline',
+            status: 'todo'
+        }
+    });
+});
 
-// SNL execution route
-router.post('/:aiName/snl', ErrorHandler.asyncWrapper(configController.executeSNL.bind(configController)));
+/**
+ * Config routes (TODO: Implement)
+ */
+router.get('/:aiName/config', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Config retrieval not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'config',
+            status: 'todo'
+        }
+    });
+});
+
+router.put('/:aiName/config/theme', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Theme configuration not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'config/theme',
+            status: 'todo'
+        }
+    });
+});
+
+/**
+ * Command routes (TODO: Implement)
+ */
+router.post('/:aiName/commands', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Command creation not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'commands',
+            status: 'todo'
+        }
+    });
+});
+
+router.get('/:aiName/commands', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Command listing not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'commands',
+            status: 'todo'
+        }
+    });
+});
+
+/**
+ * SNL routes (TODO: Implement)
+ */
+router.post('/:aiName/snl', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'SNL execution not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'snl',
+            status: 'todo'
+        }
+    });
+});
+
+/**
+ * Tag routes (TODO: Implement)
+ */
+router.post('/:aiName/tags', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Tag creation not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'tags',
+            status: 'todo'
+        }
+    });
+});
+
+router.get('/:aiName/tags', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Tag listing not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'tags',
+            status: 'todo'
+        }
+    });
+});
+
+/**
+ * Database routes (TODO: Implement)
+ */
+router.get('/:aiName/databases', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Database listing not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            endpoint: 'databases',
+            status: 'todo'
+        }
+    });
+});
+
+router.get('/:aiName/databases/:dbName/namespaces', (req, res) => {
+    res.status(501).json({
+        error: true,
+        message: 'Namespace listing not yet implemented',
+        data: {
+            aiName: req.params.aiName,
+            database: req.params.dbName,
+            endpoint: 'namespaces',
+            status: 'todo'
+        }
+    });
+});
+
+// ==================== ERROR HANDLING ====================
+
+// Handle 404 for support routes
+router.use('*', (req, res) => {
+    res.status(404).json({
+        error: true,
+        message: 'Support endpoint not found',
+        data: {
+            path: req.originalUrl,
+            method: req.method,
+            available_endpoints: [
+                'GET /api/support/info',
+                'GET /api/support/health',
+                'POST /api/support/{aiName}/timeline/record (TODO)',
+                'GET /api/support/{aiName}/timeline (TODO)',
+                'GET /api/support/{aiName}/config (TODO)',
+                'POST /api/support/{aiName}/commands (TODO)',
+                'POST /api/support/{aiName}/snl (TODO)'
+            ],
+            note: 'Most endpoints are TODO and will return 501 Not Implemented'
+        }
+    });
+});
 
 module.exports = router;

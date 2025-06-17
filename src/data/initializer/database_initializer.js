@@ -1,7 +1,6 @@
 // src/data/initializer/database_initializer.js
 
 const { getInstance } = require('../manager/keys_vo_manager');
-const UserGroupManager = require('../manager/user_group_manager');
 const AISender = require('../neuron_db/ai_sender');
 const NeuronDBSender = require('../neuron_db/sender');
 
@@ -11,7 +10,12 @@ const NeuronDBSender = require('../neuron_db/sender');
 class DatabaseInitializer {
     constructor() {
         this.sender = new NeuronDBSender();
-        this.aiSender = new AISender();
+        this.requiredDatabases = [
+            'timeline',
+            'user-data',
+            'workflow',
+            'workflow-hist'
+        ];
     }
 
     /**
@@ -20,298 +24,369 @@ class DatabaseInitializer {
      */
     async initializeAll() {
         try {
-            console.log('🚀 Starting database initialization...');
+            console.log('📦 Starting database initialization...');
 
             // Get KeysVO instance
             const keysManager = getInstance();
             const keysVO = await keysManager.getKeysVO();
 
+            // Initialize config sender
+            this.sender.initialize(keysVO.getConfigUrl(), keysVO.getConfigToken());
+
+            // Test connection first
+            const isConnected = await this.sender.testConnection();
+            if (!isConnected) {
+                console.warn('   ⚠️  NeuronDB not reachable - skipping database initialization');
+                return;
+            }
+
             // Initialize for each AI instance
             for (const aiName of keysVO.getAINames()) {
-                console.log(`📦 Initializing databases for AI: ${aiName}`);
+                console.log(`   🔧 Initializing databases for AI: ${aiName}`);
                 await this.initializeAI(aiName, keysVO);
             }
 
             console.log('✅ Database initialization completed successfully');
+
         } catch (error) {
             console.error('❌ Database initialization failed:', error);
-            throw error;
+            // Don't throw - this is not critical for application startup
+            console.warn('⚠️  Continuing without database initialization');
         }
     }
 
     /**
      * Initialize databases for specific AI
      * @param {string} aiName - AI name
-     * @param {KeysVO} keysVO - KeysVO instance
+     * @param {Object} keysVO - KeysVO instance
      * @returns {Promise<void>}
      */
     async initializeAI(aiName, keysVO) {
         try {
+            const aiUrl = keysVO.getAIUrl(aiName);
             const aiToken = keysVO.getAIToken(aiName);
 
+            if (!aiUrl || !aiToken) {
+                console.warn(`     ⚠️  Skipping AI ${aiName}: missing URL or token`);
+                return;
+            }
+
+            // Create AI sender
+            const aiSender = new AISender();
+            aiSender.initialize(aiUrl, aiToken);
+
+            // Test AI connection
+            const isAiConnected = await aiSender.testConnection();
+            if (!isAiConnected) {
+                console.warn(`     ⚠️  AI ${aiName} not reachable - skipping`);
+                return;
+            }
+
             // 1. Initialize core databases
-            await this.initializeCoreDatabases(aiToken);
+            await this.initializeCoreDatabases(aiSender);
 
             // 2. Initialize support databases
-            await this.initializeSupportDatabases(aiToken);
+            await this.initializeSupportDatabases(aiSender);
 
-            // 3. Initialize security structures
-            await this.initializeSecurityStructures(aiName, aiToken);
+            // 3. Initialize workflow databases
+            await this.initializeWorkflowDatabases(aiSender);
 
-            console.log(`✅ AI ${aiName} initialized successfully`);
+            console.log(`     ✅ Databases initialized for AI: ${aiName}`);
+
         } catch (error) {
-            console.error(`❌ Failed to initialize AI ${aiName}:`, error);
+            console.error(`     ❌ Failed to initialize databases for AI ${aiName}:`, error);
+            // Don't throw - continue with other AIs
+        }
+    }
+
+    /**
+     * Initialize core databases
+     * @param {AISender} aiSender - AI sender instance
+     * @returns {Promise<void>}
+     */
+    async initializeCoreDatabases(aiSender) {
+        try {
+            console.log('       📚 Initializing core databases...');
+
+            // Core databases are typically created by NeuronDB itself
+            // We mainly need to ensure they exist and create core namespaces
+
+            // Create core namespace if it doesn't exist
+            await this._ensureNamespaceExists(aiSender, 'main', 'core');
+
+            console.log('       ✅ Core databases initialized');
+
+        } catch (error) {
+            console.error('       ❌ Failed to initialize core databases:', error);
             throw error;
         }
     }
 
     /**
-     * Initialize core databases required by the system
-     * @param {string} aiToken - AI token
+     * Initialize support databases
+     * @param {AISender} aiSender - AI sender instance
      * @returns {Promise<void>}
      */
-    async initializeCoreDatabases(aiToken) {
+    async initializeSupportDatabases(aiSender) {
         try {
-            console.log('   📊 Creating core databases...');
+            console.log('       📋 Initializing support databases...');
 
-            const databases = [
-                'main',      // Main database for core entities
-                'workflow',  // Workflow definitions and executions
-                'timeline',  // User timeline and audit trail
-                'user-data'  // User personal data storage
-            ];
+            // Initialize timeline database
+            await this._ensureDatabaseExists(aiSender, 'timeline');
 
-            for (const dbName of databases) {
-                try {
-                    await this.createDatabaseIfNotExists(aiToken, dbName);
-                    console.log(`     ✓ Database ${dbName} ready`);
-                } catch (error) {
-                    // Database might already exist, which is fine
-                    if (!error.message.includes('already exists')) {
-                        console.warn(`     ⚠ Warning creating database ${dbName}: ${error.message}`);
-                    } else {
-                        console.log(`     ✓ Database ${dbName} already exists`);
-                    }
-                }
+            // Initialize user-data database
+            await this._ensureDatabaseExists(aiSender, 'user-data');
+
+            console.log('       ✅ Support databases initialized');
+
+        } catch (error) {
+            console.error('       ❌ Failed to initialize support databases:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Initialize workflow databases
+     * @param {AISender} aiSender - AI sender instance
+     * @returns {Promise<void>}
+     */
+    async initializeWorkflowDatabases(aiSender) {
+        try {
+            console.log('       🔄 Initializing workflow databases...');
+
+            // Initialize workflow database
+            await this._ensureDatabaseExists(aiSender, 'workflow');
+
+            // Initialize workflow history database
+            await this._ensureDatabaseExists(aiSender, 'workflow-hist');
+
+            console.log('       ✅ Workflow databases initialized');
+
+        } catch (error) {
+            console.error('       ❌ Failed to initialize workflow databases:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Ensure database exists
+     * @private
+     */
+    async _ensureDatabaseExists(aiSender, databaseName) {
+        try {
+            // Try to list databases to check if it exists
+            const listSNL = `list(database)\nvalues("${databaseName}")\non()`;
+            const result = await aiSender.executeSNL(listSNL);
+
+            // If database doesn't exist in the list, create it
+            if (!result || Object.keys(result).length === 0) {
+                console.log(`         📝 Creating database: ${databaseName}`);
+                await aiSender.createDatabase(databaseName);
+                console.log(`         ✅ Database created: ${databaseName}`);
+            } else {
+                console.log(`         ✓ Database exists: ${databaseName}`);
             }
+
         } catch (error) {
-            console.error('Failed to initialize core databases:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Initialize support databases (as specified in requirements)
-     * @param {string} aiToken - AI token
-     * @returns {Promise<void>}
-     */
-    async initializeSupportDatabases(aiToken) {
-        try {
-            console.log('   🔧 Creating support databases...');
-
-            const supportDatabases = [
-                'workflow-ris',  // Workflow RIS database
-                'config-app',    // Application configuration
-                'temp-storage'   // Temporary storage for workflows
-            ];
-
-            for (const dbName of supportDatabases) {
+            if (error.message && error.message.includes('not found')) {
+                // Database doesn't exist, try to create it
                 try {
-                    await this.createDatabaseIfNotExists(aiToken, dbName);
-                    console.log(`     ✓ Support database ${dbName} ready`);
-                } catch (error) {
-                    if (!error.message.includes('already exists')) {
-                        console.warn(`     ⚠ Warning creating support database ${dbName}: ${error.message}`);
-                    } else {
-                        console.log(`     ✓ Support database ${dbName} already exists`);
-                    }
+                    console.log(`         📝 Creating database: ${databaseName}`);
+                    await aiSender.createDatabase(databaseName);
+                    console.log(`         ✅ Database created: ${databaseName}`);
+                } catch (createError) {
+                    console.error(`         ❌ Failed to create database ${databaseName}:`, createError.message);
                 }
+            } else {
+                console.error(`         ❌ Error checking database ${databaseName}:`, error.message);
             }
-        } catch (error) {
-            console.error('Failed to initialize support databases:', error);
-            throw error;
         }
     }
 
     /**
-     * Initialize security structures and default groups
-     * @param {string} aiName - AI name
-     * @param {string} aiToken - AI token
-     * @returns {Promise<void>}
+     * Ensure namespace exists
+     * @private
      */
-    async initializeSecurityStructures(aiName, aiToken) {
+    async _ensureNamespaceExists(aiSender, databaseName, namespaceName) {
         try {
-            console.log('   🔐 Initializing security structures...');
+            // Try to list namespaces to check if it exists
+            const listSNL = `list(namespace)\nvalues("${namespaceName}")\non(${databaseName})`;
+            const result = await aiSender.executeSNL(listSNL);
 
-            // Initialize user groups
-            const userGroupManager = new UserGroupManager(aiToken);
-            await userGroupManager.initialize();
+            // If namespace doesn't exist in the list, create it
+            if (!result || Object.keys(result).length === 0) {
+                console.log(`         📁 Creating namespace: ${databaseName}.${namespaceName}`);
+                await aiSender.createNamespace(databaseName, namespaceName);
+                console.log(`         ✅ Namespace created: ${databaseName}.${namespaceName}`);
+            } else {
+                console.log(`         ✓ Namespace exists: ${databaseName}.${namespaceName}`);
+            }
 
-            // Create default groups
-            await userGroupManager.createDefaultGroups(aiName);
-
-            // Create default subscription admin user
-            await this.createDefaultSubscriptionAdminUser(aiName, aiToken);
-
-            console.log('     ✓ Security structures initialized');
         } catch (error) {
-            console.error('Failed to initialize security structures:', error);
-            throw error;
+            if (error.message && error.message.includes('not found')) {
+                // Namespace doesn't exist, try to create it
+                try {
+                    console.log(`         📁 Creating namespace: ${databaseName}.${namespaceName}`);
+                    await aiSender.createNamespace(databaseName, namespaceName);
+                    console.log(`         ✅ Namespace created: ${databaseName}.${namespaceName}`);
+                } catch (createError) {
+                    console.error(`         ❌ Failed to create namespace ${databaseName}.${namespaceName}:`, createError.message);
+                }
+            } else {
+                console.error(`         ❌ Error checking namespace ${databaseName}.${namespaceName}:`, error.message);
+            }
         }
     }
 
     /**
-     * Create default subscription admin user
+     * Initialize user-specific namespaces
      * @param {string} aiName - AI name
-     * @param {string} aiToken - AI token
+     * @param {string} userEmail - User email
      * @returns {Promise<void>}
      */
-    async createDefaultSubscriptionAdminUser(aiName, aiToken) {
+    async initializeUserNamespaces(aiName, userEmail) {
         try {
-            const defaultCredentials = {
-                username: 'subscription_admin',
-                password: 'sudo_subscription_admin',
-                email: 'subscription_admin@system.local'
+            console.log(`   👤 Initializing user namespaces for ${userEmail} in AI: ${aiName}`);
+
+            // Get AI configuration
+            const keysManager = getInstance();
+            const keysVO = await keysManager.getKeysVO();
+
+            const aiUrl = keysVO.getAIUrl(aiName);
+            const aiToken = keysVO.getAIToken(aiName);
+
+            if (!aiUrl || !aiToken) {
+                throw new Error(`AI ${aiName} not configured`);
+            }
+
+            // Create AI sender
+            const aiSender = new AISender();
+            aiSender.initialize(aiUrl, aiToken);
+
+            // Generate namespace name from email
+            const namespaceName = this._generateNamespaceFromEmail(userEmail);
+
+            // Create user namespaces in support databases
+            await this._ensureNamespaceExists(aiSender, 'timeline', namespaceName);
+            await this._ensureNamespaceExists(aiSender, 'user-data', namespaceName);
+
+            console.log(`   ✅ User namespaces initialized for ${userEmail}`);
+
+        } catch (error) {
+            console.error(`   ❌ Failed to initialize user namespaces for ${userEmail}:`, error);
+            // Don't throw - this shouldn't block user operations
+        }
+    }
+
+    /**
+     * Generate namespace name from email
+     * @private
+     */
+    _generateNamespaceFromEmail(email) {
+        return email.replace('@', '_').replace(/\./g, '_').toLowerCase();
+    }
+
+    /**
+     * Get database status
+     * @returns {Promise<Object>} Database status
+     */
+    async getDatabaseStatus() {
+        try {
+            const keysManager = getInstance();
+            const keysVO = await keysManager.getKeysVO();
+
+            // Initialize config sender
+            this.sender.initialize(keysVO.getConfigUrl(), keysVO.getConfigToken());
+
+            const status = {
+                connected: false,
+                databases: {},
+                aiInstances: {}
             };
 
-            // Check if subscription_admin user already exists
-            try {
-                // Try to login with existing credentials
-                await this.aiSender.login(aiToken, defaultCredentials.username, defaultCredentials.password);
-                console.log(`     ✓ Subscription admin user already exists for AI: ${aiName}`);
-                return;
-            } catch (error) {
-                // User doesn't exist or credentials are wrong, create new user
-            }
+            // Test config connection
+            status.connected = await this.sender.testConnection();
 
-            // Create subscription admin user
-            try {
-                await this.aiSender.createUser(
-                    aiToken,
-                    defaultCredentials.username,
-                    defaultCredentials.password,
-                    defaultCredentials.email,
-                    ['subscription_admin']
-                );
-                console.log(`     ✓ Subscription admin user created for AI: ${aiName}`);
-            } catch (error) {
-                if (error.message.includes('already exists')) {
-                    console.log(`     ✓ Subscription admin user already exists for AI: ${aiName}`);
-                } else {
-                    console.warn(`     ⚠ Warning creating subscription admin user: ${error.message}`);
+            if (status.connected) {
+                // Check each required database
+                for (const dbName of this.requiredDatabases) {
+                    try {
+                        const listSNL = `list(database)\nvalues("${dbName}")\non()`;
+                        const result = await this.sender.executeSNL(listSNL);
+                        status.databases[dbName] = {
+                            exists: !!(result && Object.keys(result).length > 0),
+                            lastChecked: new Date().toISOString()
+                        };
+                    } catch (error) {
+                        status.databases[dbName] = {
+                            exists: false,
+                            error: error.message,
+                            lastChecked: new Date().toISOString()
+                        };
+                    }
+                }
+
+                // Check AI instances
+                for (const aiName of keysVO.getAINames()) {
+                    try {
+                        const aiUrl = keysVO.getAIUrl(aiName);
+                        const aiToken = keysVO.getAIToken(aiName);
+
+                        if (aiUrl && aiToken) {
+                            const aiSender = new AISender();
+                            aiSender.initialize(aiUrl, aiToken);
+
+                            status.aiInstances[aiName] = {
+                                connected: await aiSender.testConnection(),
+                                url: aiUrl,
+                                hasToken: !!aiToken,
+                                lastChecked: new Date().toISOString()
+                            };
+                        } else {
+                            status.aiInstances[aiName] = {
+                                connected: false,
+                                error: 'Missing URL or token',
+                                lastChecked: new Date().toISOString()
+                            };
+                        }
+                    } catch (error) {
+                        status.aiInstances[aiName] = {
+                            connected: false,
+                            error: error.message,
+                            lastChecked: new Date().toISOString()
+                        };
+                    }
                 }
             }
+
+            return status;
+
         } catch (error) {
-            console.error('Failed to create default subscription admin user:', error);
-            throw error;
+            console.error('Failed to get database status:', error);
+            return {
+                connected: false,
+                error: error.message,
+                databases: {},
+                aiInstances: {}
+            };
         }
     }
 
     /**
-     * Create database if it doesn't exist
-     * @param {string} aiToken - AI token
-     * @param {string} databaseName - Database name
+     * Reinitialize all databases
      * @returns {Promise<void>}
      */
-    async createDatabaseIfNotExists(aiToken, databaseName) {
+    async reinitializeAll() {
         try {
-            // List existing databases
-            const databases = await this.aiSender.listDatabases(aiToken);
+            console.log('🔄 Reinitializing all databases...');
+            await this.initializeAll();
+            console.log('✅ Database reinitialization completed');
 
-            // Check if database already exists
-            if (databases.includes(databaseName)) {
-                return; // Database already exists
-            }
-
-            // Create database
-            await this.aiSender.createDatabase(aiToken, databaseName);
         } catch (error) {
-            // If error is about database already existing, that's fine
-            if (error.message.includes('already exists') || error.message.includes('duplicate')) {
-                return;
-            }
+            console.error('❌ Database reinitialization failed:', error);
             throw error;
-        }
-    }
-
-    /**
-     * Initialize main core entities
-     * @param {string} aiToken - AI token
-     * @returns {Promise<void>}
-     */
-    async initializeMainCoreEntities(aiToken) {
-        try {
-            console.log('   🏗 Creating main core entities...');
-
-            const entities = [
-                'plans',         // Subscription plans
-                'subscriptions', // User subscriptions
-                'planlimits',    // Plan limitations
-                'usersplans',    // User-plan relationships
-                'userroles'      // User roles
-            ];
-
-            // Create each entity in main.core namespace
-            for (const entityName of entities) {
-                try {
-                    const createEntitySNL = `set(structure)\nvalues("${entityName}", {})\non(main.core.${entityName})`;
-                    await this.aiSender.executeSNL(createEntitySNL, aiToken);
-                    console.log(`     ✓ Entity ${entityName} ready`);
-                } catch (error) {
-                    // Entity might already exist
-                    console.log(`     ✓ Entity ${entityName} already exists`);
-                }
-            }
-        } catch (error) {
-            console.error('Failed to initialize main core entities:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Verify initialization
-     * @param {string} aiName - AI name
-     * @param {string} aiToken - AI token
-     * @returns {Promise<boolean>}
-     */
-    async verifyInitialization(aiName, aiToken) {
-        try {
-            console.log(`   🔍 Verifying initialization for AI: ${aiName}...`);
-
-            // Check if main databases exist
-            const databases = await this.aiSender.listDatabases(aiToken);
-            const requiredDbs = ['main', 'workflow', 'timeline', 'user-data'];
-
-            for (const db of requiredDbs) {
-                if (!databases.includes(db)) {
-                    console.error(`   ❌ Database ${db} not found`);
-                    return false;
-                }
-            }
-
-            // Check if user groups structure exists
-            const checkGroupsSNL = 'list(structure)\nvalues("usergroups")\non(main.core)';
-            const groupsResponse = await this.aiSender.executeSNL(checkGroupsSNL, aiToken);
-
-            if (!groupsResponse || !groupsResponse.usergroups) {
-                console.error('   ❌ User groups structure not found');
-                return false;
-            }
-
-            console.log(`   ✅ Initialization verified for AI: ${aiName}`);
-            return true;
-        } catch (error) {
-            console.error(`Failed to verify initialization for AI ${aiName}:`, error);
-            return false;
         }
     }
 }
 
-// Export both class and convenience function
-module.exports = DatabaseInitializer;
-
-// Convenience function for npm script
-module.exports.initializeAll = async function() {
-    const initializer = new DatabaseInitializer();
-    await initializer.initializeAll();
-};
+module.exports = DatabaseInitializer;src/api/support/routes.js

@@ -1,30 +1,45 @@
 // src/api/security/controllers/auth_controller.js
 
-const { getInstance } = require('../../../data/manager/keys_vo_manager');
-const UserManager = require('../../../data/manager/user_manager');
+const AuthManager = require('../../../data/manager/auth_manager');
 const UserGroupManager = require('../../../data/manager/user_group_manager');
-const SubscriptionManager = require('../../../data/manager/subscription_manager');
-const TimelineManager = require('../../../data/manager/timeline_manager');
-const NeuronDBSender = require('../../../data/neuron_db/sender');
-const { AuthenticationError, ValidationError, NotFoundError } = require('../../../cross/entity/errors');
+const AISender = require('../../../data/neuron_db/ai_sender');
+const { getInstance } = require('../../../data/manager/keys_vo_manager');
+const {
+    AuthenticationError,
+    ValidationError,
+    NotFoundError,
+    NeuronDBError
+} = require('../../../cross/entity/errors');
 
 /**
- * Authentication Controller for NeuronCore Security API
+ * Auth Controller for NeuronCore Security API
  */
 class AuthController {
     constructor() {
-        this.sender = new NeuronDBSender();
+        this.authManager = new AuthManager();
+        this.groupManager = new UserGroupManager();
     }
 
     /**
-     * Get AI token for operations
+     * Get AI sender for specific AI
      * @param {string} aiName - AI name
-     * @returns {Promise<string>}
+     * @returns {Promise<AISender>}
      */
-    async getAIToken(aiName) {
+    async getAISender(aiName) {
         const keysManager = getInstance();
         const keysVO = await keysManager.getKeysVO();
-        return keysVO.getAIToken(aiName);
+
+        const aiUrl = keysVO.getAIUrl(aiName);
+        const aiToken = keysVO.getAIToken(aiName);
+
+        if (!aiUrl || !aiToken) {
+            throw new NotFoundError(`AI '${aiName}' not found or not configured`);
+        }
+
+        const sender = new AISender();
+        sender.initialize(aiUrl, aiToken);
+
+        return sender;
     }
 
     /**
@@ -41,45 +56,38 @@ class AuthController {
                 throw new ValidationError('Username and password are required');
             }
 
-            // Use NeuronDB login directly
-            const token = await this.sender.login(aiName, username, password);
+            // Get AI sender
+            const aiSender = await this.getAISender(aiName);
 
-            // Log security action
-            try {
-                const aiToken = await this.getAIToken(aiName);
-                const timelineManager = new TimelineManager(aiToken);
-                await timelineManager.logSecurityAction(
-                    username, // Assuming username is email for now
-                    aiName,
-                    'user_login',
-                    {
-                        username,
-                        loginTime: new Date().toISOString(),
-                        userAgent: req.headers['user-agent'],
-                        ip: req.ip || req.connection.remoteAddress
-                    }
-                );
-            } catch (timelineError) {
-                console.warn('Failed to log login action to timeline:', timelineError.message);
-            }
+            // Initialize auth manager with AI sender
+            this.authManager.initialize(aiSender);
+
+            // Perform login
+            const loginResult = await this.authManager.login(username, password);
 
             res.json({
                 error: false,
-                data: {
-                    token: token,
-                    user: username,
-                    aiName: aiName,
-                    loginTime: new Date().toISOString()
-                }
+                message: 'Login successful',
+                data: loginResult
             });
 
         } catch (error) {
             console.error('Login error:', error);
 
-            if (error.message.includes('Invalid credentials')) {
+            if (error instanceof ValidationError) {
+                res.status(400).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof AuthenticationError) {
                 res.status(401).json({
                     error: true,
-                    message: 'Invalid credentials'
+                    message: error.message
+                });
+            } else if (error instanceof NotFoundError) {
+                res.status(404).json({
+                    error: true,
+                    message: error.message
                 });
             } else {
                 res.status(500).json({
@@ -97,37 +105,56 @@ class AuthController {
      */
     async validateToken(req, res) {
         try {
-            const token = req.headers.authorization?.replace('Bearer ', '') || req.body.token;
+            const { aiName } = req.params;
+            const token = req.headers.authorization?.replace('Bearer ', '');
 
             if (!token) {
-                throw new AuthenticationError('Token is required');
+                throw new ValidationError('Authorization token is required');
             }
 
+            // Get AI sender
+            const aiSender = await this.getAISender(aiName);
+
+            // Initialize auth manager with AI sender
+            this.authManager.initialize(aiSender);
+
             // Validate token
-            const userInfo = await this.sender.validateToken(token);
+            const userInfo = await this.authManager.validateToken(token);
 
             res.json({
                 error: false,
+                message: 'Token is valid',
                 data: {
                     valid: true,
-                    user: {
-                        username: userInfo.username,
-                        email: userInfo.email,
-                        groups: userInfo.groups || [],
-                        permissions: userInfo.permissions || [],
-                        aiName: userInfo.aiName
-                    },
-                    validatedAt: new Date().toISOString()
+                    user: userInfo
                 }
             });
 
         } catch (error) {
             console.error('Token validation error:', error);
 
-            res.status(401).json({
-                error: true,
-                message: 'Invalid or expired token'
-            });
+            if (error instanceof ValidationError) {
+                res.status(400).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof AuthenticationError) {
+                res.status(401).json({
+                    error: true,
+                    message: error.message,
+                    data: { valid: false }
+                });
+            } else if (error instanceof NotFoundError) {
+                res.status(404).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'Token validation failed'
+                });
+            }
         }
     }
 
@@ -139,65 +166,47 @@ class AuthController {
     async changePassword(req, res) {
         try {
             const { aiName } = req.params;
-            const { username, currentPassword, newPassword } = req.body;
+            const { newPassword } = req.body;
             const token = req.headers.authorization?.replace('Bearer ', '');
 
             if (!token) {
-                throw new AuthenticationError('Token is required');
+                throw new ValidationError('Authorization token is required');
             }
 
-            if (!username || !currentPassword || !newPassword) {
-                throw new ValidationError('Username, current password, and new password are required');
+            if (!newPassword) {
+                throw new ValidationError('New password is required');
             }
 
-            // Validate new password strength
-            if (newPassword.length < 8) {
-                throw new ValidationError('New password must be at least 8 characters long');
-            }
+            // Get AI sender
+            const aiSender = await this.getAISender(aiName);
 
-            // Validate token and check if user can change this password
-            const userInfo = await this.sender.validateToken(token);
-
-            // Users can only change their own password unless they are admin
-            if (userInfo.username !== username && !userInfo.groups?.includes('admin')) {
-                throw new AuthenticationError('You can only change your own password');
-            }
+            // Initialize auth manager with AI sender
+            this.authManager.initialize(aiSender);
 
             // Change password
-            await this.sender.changePassword(aiName, username, currentPassword, newPassword);
-
-            // Log security action
-            try {
-                const aiToken = await this.getAIToken(aiName);
-                const timelineManager = new TimelineManager(aiToken);
-                await timelineManager.logSecurityAction(
-                    userInfo.email || username,
-                    aiName,
-                    'password_changed',
-                    {
-                        targetUser: username,
-                        changedBy: userInfo.username,
-                        changeTime: new Date().toISOString()
-                    }
-                );
-            } catch (timelineError) {
-                console.warn('Failed to log password change to timeline:', timelineError.message);
-            }
+            const result = await this.authManager.changePassword(token, newPassword);
 
             res.json({
                 error: false,
                 message: 'Password changed successfully',
-                data: {
-                    username: username,
-                    changedAt: new Date().toISOString()
-                }
+                data: result
             });
 
         } catch (error) {
             console.error('Change password error:', error);
 
-            if (error instanceof AuthenticationError || error instanceof ValidationError) {
-                res.status(error.statusCode).json({
+            if (error instanceof ValidationError) {
+                res.status(400).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof AuthenticationError) {
+                res.status(401).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof NotFoundError) {
+                res.status(404).json({
                     error: true,
                     message: error.message
                 });
@@ -211,140 +220,221 @@ class AuthController {
     }
 
     /**
-     * Logout endpoint
+     * Create user endpoint
      * @param {Object} req - Express request
      * @param {Object} res - Express response
      */
-    async logout(req, res) {
+    async createUser(req, res) {
         try {
             const { aiName } = req.params;
-            const token = req.headers.authorization?.replace('Bearer ', '');
+            const { email, password, nick } = req.body;
+            const adminToken = req.headers.authorization?.replace('Bearer ', '');
 
-            if (!token) {
-                throw new AuthenticationError('Token is required');
+            if (!adminToken) {
+                throw new ValidationError('Authorization token is required');
             }
 
-            // Get user info before logout
-            const userInfo = await this.sender.validateToken(token);
-
-            // Log security action
-            try {
-                const aiToken = await this.getAIToken(aiName);
-                const timelineManager = new TimelineManager(aiToken);
-                await timelineManager.logSecurityAction(
-                    userInfo.email || userInfo.username,
-                    aiName,
-                    'user_logout',
-                    {
-                        username: userInfo.username,
-                        logoutTime: new Date().toISOString()
-                    }
-                );
-            } catch (timelineError) {
-                console.warn('Failed to log logout action to timeline:', timelineError.message);
+            if (!email || !password || !nick) {
+                throw new ValidationError('Email, password, and nick are required');
             }
 
-            // Note: In a real implementation, you might want to blacklist the token
-            // For now, we just return success
+            // Get AI sender
+            const aiSender = await this.getAISender(aiName);
+
+            // Initialize managers with AI sender
+            this.authManager.initialize(aiSender);
+            this.groupManager.initialize(aiSender);
+
+            // Prepare user data
+            const userData = {
+                email,
+                password,
+                nick,
+                permissions: {
+                    main: 1 // Default read permission
+                }
+            };
+
+            // Create user
+            const result = await this.authManager.createUser(adminToken, userData);
+
             res.json({
                 error: false,
-                message: 'Logged out successfully',
-                data: {
-                    username: userInfo.username,
-                    logoutTime: new Date().toISOString()
-                }
+                message: 'User created successfully',
+                data: result
             });
 
         } catch (error) {
-            console.error('Logout error:', error);
+            console.error('Create user error:', error);
 
-            // Even if logout fails, we return success for security
-            res.json({
-                error: false,
-                message: 'Logged out successfully',
-                data: {
-                    logoutTime: new Date().toISOString()
-                }
-            });
+            if (error instanceof ValidationError) {
+                res.status(400).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof AuthenticationError) {
+                res.status(401).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof NotFoundError) {
+                res.status(404).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'User creation failed'
+                });
+            }
         }
     }
 
     /**
-     * Refresh token endpoint
-     * @param {Object} req - Express request
-     * @param {Object} res - Express response
-     */
-    async refreshToken(req, res) {
-        try {
-            const { aiName } = req.params;
-            const { refreshToken } = req.body;
-            const currentToken = req.headers.authorization?.replace('Bearer ', '');
-
-            if (!currentToken && !refreshToken) {
-                throw new AuthenticationError('Current token or refresh token is required');
-            }
-
-            // Validate current token
-            const userInfo = await this.sender.validateToken(currentToken || refreshToken);
-
-            // In a real implementation, you would generate a new token
-            // For now, we'll return the same token with updated timestamp
-            res.json({
-                error: false,
-                message: 'Token refreshed successfully',
-                data: {
-                    token: currentToken || refreshToken,
-                    user: userInfo.username,
-                    refreshedAt: new Date().toISOString(),
-                    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
-                }
-            });
-
-        } catch (error) {
-            console.error('Refresh token error:', error);
-
-            res.status(401).json({
-                error: true,
-                message: 'Token refresh failed'
-            });
-        }
-    }
-
-    /**
-     * Get current user info endpoint
+     * Get current user endpoint
      * @param {Object} req - Express request
      * @param {Object} res - Express response
      */
     async getCurrentUser(req, res) {
         try {
+            const { aiName } = req.params;
             const token = req.headers.authorization?.replace('Bearer ', '');
 
             if (!token) {
-                throw new AuthenticationError('Token is required');
+                throw new ValidationError('Authorization token is required');
             }
 
+            // Get AI sender
+            const aiSender = await this.getAISender(aiName);
+
+            // Initialize auth manager with AI sender
+            this.authManager.initialize(aiSender);
+
             // Get user info
-            const userInfo = await this.sender.validateToken(token);
+            const userInfo = await this.authManager.validateToken(token);
 
             res.json({
                 error: false,
+                message: 'User information retrieved',
                 data: {
-                    username: userInfo.username,
-                    email: userInfo.email,
-                    groups: userInfo.groups || [],
-                    permissions: userInfo.permissions || [],
-                    aiName: userInfo.aiName,
-                    lastValidated: new Date().toISOString()
+                    user: userInfo
                 }
             });
 
         } catch (error) {
             console.error('Get current user error:', error);
 
-            res.status(401).json({
-                error: true,
-                message: 'Failed to get user information'
+            if (error instanceof ValidationError) {
+                res.status(400).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof AuthenticationError) {
+                res.status(401).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof NotFoundError) {
+                res.status(404).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'Failed to get user information'
+                });
+            }
+        }
+    }
+
+    /**
+     * Logout endpoint (for completeness, JWT is stateless)
+     * @param {Object} req - Express request
+     * @param {Object} res - Express response
+     */
+    async logout(req, res) {
+        try {
+            // JWT is stateless, so logout is mainly client-side
+            // Could implement token blacklisting in the future
+
+            res.json({
+                error: false,
+                message: 'Logout successful',
+                data: {
+                    message: 'Please remove the token from client storage'
+                }
             });
+
+        } catch (error) {
+            console.error('Logout error:', error);
+
+            res.status(500).json({
+                error: true,
+                message: 'Logout failed'
+            });
+        }
+    }
+
+    /**
+     * Refresh token endpoint (for future implementation)
+     * @param {Object} req - Express request
+     * @param {Object} res - Express response
+     */
+    async refreshToken(req, res) {
+        try {
+            const { aiName } = req.params;
+            const token = req.headers.authorization?.replace('Bearer ', '');
+
+            if (!token) {
+                throw new ValidationError('Authorization token is required');
+            }
+
+            // Get AI sender
+            const aiSender = await this.getAISender(aiName);
+
+            // Initialize auth manager with AI sender
+            this.authManager.initialize(aiSender);
+
+            // Validate current token first
+            const userInfo = await this.authManager.validateToken(token);
+
+            // For now, return the same token (could implement refresh logic)
+            res.json({
+                error: false,
+                message: 'Token refreshed',
+                data: {
+                    token: token,
+                    user: userInfo,
+                    expiresIn: '24h'
+                }
+            });
+
+        } catch (error) {
+            console.error('Refresh token error:', error);
+
+            if (error instanceof ValidationError) {
+                res.status(400).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof AuthenticationError) {
+                res.status(401).json({
+                    error: true,
+                    message: error.message
+                });
+            } else if (error instanceof NotFoundError) {
+                res.status(404).json({
+                    error: true,
+                    message: error.message
+                });
+            } else {
+                res.status(500).json({
+                    error: true,
+                    message: 'Token refresh failed'
+                });
+            }
         }
     }
 }

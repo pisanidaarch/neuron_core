@@ -1,104 +1,163 @@
 // src/cross/entity/errors.js
 
 /**
- * Base Error class for NeuronCore
+ * Custom Error Classes for NeuronCore
+ */
+
+/**
+ * Base NeuronCore Error
  */
 class NeuronCoreError extends Error {
-    constructor(message, statusCode = 500) {
+    constructor(message, code = 'NEURON_CORE_ERROR') {
         super(message);
         this.name = this.constructor.name;
-        this.statusCode = statusCode;
-        Error.captureStackTrace(this, this.constructor);
+        this.code = code;
+        this.timestamp = new Date().toISOString();
+
+        // Maintains proper stack trace for where our error was thrown (only available on V8)
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, this.constructor);
+        }
+    }
+
+    toJSON() {
+        return {
+            name: this.name,
+            message: this.message,
+            code: this.code,
+            timestamp: this.timestamp,
+            stack: this.stack
+        };
     }
 }
 
 /**
- * Authentication Error - 401
+ * Authentication Error
  */
 class AuthenticationError extends NeuronCoreError {
     constructor(message = 'Authentication failed') {
-        super(message, 401);
+        super(message, 'AUTHENTICATION_ERROR');
     }
 }
 
 /**
- * Authorization Error - 403
+ * Authorization Error
  */
 class AuthorizationError extends NeuronCoreError {
-    constructor(message = 'Access denied') {
-        super(message, 403);
+    constructor(message = 'Authorization failed') {
+        super(message, 'AUTHORIZATION_ERROR');
     }
 }
 
 /**
- * Validation Error - 400
+ * Validation Error
  */
 class ValidationError extends NeuronCoreError {
-    constructor(message = 'Validation failed') {
-        super(message, 400);
+    constructor(message = 'Validation failed', field = null) {
+        super(message, 'VALIDATION_ERROR');
+        this.field = field;
+    }
+
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            field: this.field
+        };
     }
 }
 
 /**
- * Not Found Error - 404
+ * Not Found Error
  */
 class NotFoundError extends NeuronCoreError {
-    constructor(message = 'Resource not found') {
-        super(message, 404);
+    constructor(message = 'Resource not found', resource = null) {
+        super(message, 'NOT_FOUND_ERROR');
+        this.resource = resource;
+    }
+
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            resource: this.resource
+        };
     }
 }
 
 /**
- * Conflict Error - 409
- */
-class ConflictError extends NeuronCoreError {
-    constructor(message = 'Resource conflict') {
-        super(message, 409);
-    }
-}
-
-/**
- * NeuronDB Error - Database related errors
+ * NeuronDB Error
  */
 class NeuronDBError extends NeuronCoreError {
     constructor(message = 'Database operation failed') {
-        super(message, 500);
+        super(message, 'NEURON_DB_ERROR');
     }
 }
 
 /**
- * Security Error - Security related errors
- */
-class SecurityError extends NeuronCoreError {
-    constructor(message = 'Security violation') {
-        super(message, 403);
-    }
-}
-
-/**
- * Configuration Error - Configuration related errors
+ * Configuration Error
  */
 class ConfigurationError extends NeuronCoreError {
     constructor(message = 'Configuration error') {
-        super(message, 500);
+        super(message, 'CONFIGURATION_ERROR');
     }
 }
 
 /**
- * Rate Limit Error - 429
+ * Permission Error
+ */
+class PermissionError extends NeuronCoreError {
+    constructor(message = 'Permission denied', permission = null) {
+        super(message, 'PERMISSION_ERROR');
+        this.permission = permission;
+    }
+
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            permission: this.permission
+        };
+    }
+}
+
+/**
+ * Rate Limit Error
  */
 class RateLimitError extends NeuronCoreError {
-    constructor(message = 'Rate limit exceeded') {
-        super(message, 429);
+    constructor(message = 'Rate limit exceeded', retryAfter = null) {
+        super(message, 'RATE_LIMIT_ERROR');
+        this.retryAfter = retryAfter;
+    }
+
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            retryAfter: this.retryAfter
+        };
     }
 }
 
 /**
- * Service Unavailable Error - 503
+ * SNL Error
  */
-class ServiceUnavailableError extends NeuronCoreError {
-    constructor(message = 'Service temporarily unavailable') {
-        super(message, 503);
+class SNLError extends NeuronCoreError {
+    constructor(message = 'SNL operation failed', command = null) {
+        super(message, 'SNL_ERROR');
+        this.command = command;
+    }
+
+    toJSON() {
+        return {
+            ...super.toJSON(),
+            command: this.command
+        };
+    }
+}
+
+/**
+ * Token Error
+ */
+class TokenError extends NeuronCoreError {
+    constructor(message = 'Token error') {
+        super(message, 'TOKEN_ERROR');
     }
 }
 
@@ -107,78 +166,9 @@ class ServiceUnavailableError extends NeuronCoreError {
  */
 class ErrorHandler {
     /**
-     * Handle errors in Express middleware
-     * @param {Error} error - Error object
-     * @param {Object} req - Express request
-     * @param {Object} res - Express response
-     * @param {Function} next - Express next function
-     */
-    static handleError(error, req, res, next) {
-        // Log error for debugging
-        console.error('Error occurred:', {
-            message: error.message,
-            stack: error.stack,
-            url: req.url,
-            method: req.method,
-            timestamp: new Date().toISOString()
-        });
-
-        // Handle known error types
-        if (error instanceof NeuronCoreError) {
-            return res.status(error.statusCode).json({
-                error: true,
-                message: error.message,
-                type: error.name
-            });
-        }
-
-        // Handle validation errors from other libraries
-        if (error.name === 'ValidationError') {
-            return res.status(400).json({
-                error: true,
-                message: error.message,
-                type: 'ValidationError'
-            });
-        }
-
-        // Handle JWT errors
-        if (error.name === 'JsonWebTokenError') {
-            return res.status(401).json({
-                error: true,
-                message: 'Invalid token',
-                type: 'AuthenticationError'
-            });
-        }
-
-        if (error.name === 'TokenExpiredError') {
-            return res.status(401).json({
-                error: true,
-                message: 'Token expired',
-                type: 'AuthenticationError'
-            });
-        }
-
-        // Handle syntax errors
-        if (error instanceof SyntaxError) {
-            return res.status(400).json({
-                error: true,
-                message: 'Invalid JSON in request body',
-                type: 'ValidationError'
-            });
-        }
-
-        // Default error handler
-        res.status(500).json({
-            error: true,
-            message: 'Internal server error',
-            type: 'InternalServerError'
-        });
-    }
-
-    /**
-     * Async error wrapper for route handlers
+     * Async wrapper for Express routes
      * @param {Function} fn - Async function to wrap
-     * @returns {Function} Wrapped function
+     * @returns {Function} Express middleware function
      */
     static asyncWrapper(fn) {
         return (req, res, next) => {
@@ -187,29 +177,122 @@ class ErrorHandler {
     }
 
     /**
-     * Create error response object
-     * @param {string} message - Error message
-     * @param {string} type - Error type
-     * @param {number} statusCode - HTTP status code
-     * @returns {Object}
+     * Global error handler middleware
+     * @param {Error} error - Error object
+     * @param {Object} req - Express request
+     * @param {Object} res - Express response
+     * @param {Function} next - Express next function
      */
-    static createErrorResponse(message, type = 'Error', statusCode = 500) {
-        return {
+    static handleError(error, req, res, next) {
+        // Log error
+        console.error('Error occurred:', {
+            name: error.name,
+            message: error.message,
+            code: error.code,
+            stack: error.stack,
+            url: req.url,
+            method: req.method,
+            timestamp: new Date().toISOString()
+        });
+
+        // Set default error response
+        let statusCode = 500;
+        let errorResponse = {
             error: true,
-            message,
-            type,
-            statusCode,
+            message: 'Internal server error',
+            code: 'INTERNAL_ERROR',
             timestamp: new Date().toISOString()
         };
+
+        // Handle specific error types
+        if (error instanceof ValidationError) {
+            statusCode = 400;
+            errorResponse = {
+                error: true,
+                message: error.message,
+                code: error.code,
+                field: error.field,
+                timestamp: error.timestamp
+            };
+        } else if (error instanceof AuthenticationError) {
+            statusCode = 401;
+            errorResponse = {
+                error: true,
+                message: error.message,
+                code: error.code,
+                timestamp: error.timestamp
+            };
+        } else if (error instanceof AuthorizationError || error instanceof PermissionError) {
+            statusCode = 403;
+            errorResponse = {
+                error: true,
+                message: error.message,
+                code: error.code,
+                timestamp: error.timestamp
+            };
+        } else if (error instanceof NotFoundError) {
+            statusCode = 404;
+            errorResponse = {
+                error: true,
+                message: error.message,
+                code: error.code,
+                resource: error.resource,
+                timestamp: error.timestamp
+            };
+        } else if (error instanceof RateLimitError) {
+            statusCode = 429;
+            errorResponse = {
+                error: true,
+                message: error.message,
+                code: error.code,
+                retryAfter: error.retryAfter,
+                timestamp: error.timestamp
+            };
+        } else if (error instanceof NeuronCoreError) {
+            // Generic NeuronCore error
+            statusCode = 500;
+            errorResponse = {
+                error: true,
+                message: error.message,
+                code: error.code,
+                timestamp: error.timestamp
+            };
+        }
+
+        // Add debug info in development
+        if (process.env.NODE_ENV === 'development') {
+            errorResponse.stack = error.stack;
+            errorResponse.url = req.url;
+            errorResponse.method = req.method;
+        }
+
+        res.status(statusCode).json(errorResponse);
+    }
+
+    /**
+     * Create error response object
+     * @param {Error} error - Error object
+     * @param {Object} additionalInfo - Additional info to include
+     * @returns {Object} Error response
+     */
+    static createErrorResponse(error, additionalInfo = {}) {
+        const baseResponse = {
+            error: true,
+            message: error.message || 'An error occurred',
+            code: error.code || 'UNKNOWN_ERROR',
+            timestamp: new Date().toISOString()
+        };
+
+        return { ...baseResponse, ...additionalInfo };
     }
 
     /**
      * Create success response object
-     * @param {any} data - Response data
+     * @param {*} data - Response data
      * @param {string} message - Success message
-     * @returns {Object}
+     * @returns {Object} Success response
      */
-    static createSuccessResponse(data, message = 'Success') {
+    static createSuccessResponse(data, message = 'Operation successful') {
         return {
             error: false,
             message,
@@ -217,19 +300,68 @@ class ErrorHandler {
             timestamp: new Date().toISOString()
         };
     }
+
+    /**
+     * Validate required fields
+     * @param {Object} data - Data to validate
+     * @param {Array} requiredFields - Array of required field names
+     * @throws {ValidationError} If validation fails
+     */
+    static validateRequiredFields(data, requiredFields) {
+        const missing = requiredFields.filter(field =>
+            data[field] === undefined || data[field] === null || data[field] === ''
+        );
+
+        if (missing.length > 0) {
+            throw new ValidationError(
+                `Missing required fields: ${missing.join(', ')}`,
+                missing[0]
+            );
+        }
+    }
+
+    /**
+     * Validate email format
+     * @param {string} email - Email to validate
+     * @throws {ValidationError} If email is invalid
+     */
+    static validateEmail(email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            throw new ValidationError('Invalid email format', 'email');
+        }
+    }
+
+    /**
+     * Validate password strength
+     * @param {string} password - Password to validate
+     * @param {number} minLength - Minimum length
+     * @throws {ValidationError} If password is weak
+     */
+    static validatePassword(password, minLength = 6) {
+        if (!password || password.length < minLength) {
+            throw new ValidationError(
+                `Password must be at least ${minLength} characters long`,
+                'password'
+            );
+        }
+    }
 }
 
 module.exports = {
+    // Error classes
     NeuronCoreError,
     AuthenticationError,
     AuthorizationError,
     ValidationError,
     NotFoundError,
-    ConflictError,
     NeuronDBError,
-    SecurityError,
     ConfigurationError,
+    PermissionError,
     RateLimitError,
-    ServiceUnavailableError,
+    SNLError,
+    TokenError,
+
+    // Utility class
     ErrorHandler
 };

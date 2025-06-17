@@ -1,376 +1,415 @@
 // src/data/neuron_db/ai_sender.js
 
 const axios = require('axios');
-const { getInstance } = require('../manager/keys_vo_manager');
+const { NeuronDBError, AuthenticationError, ValidationError } = require('../../cross/entity/errors');
 
 /**
- * AISender - Handles communication with AI-specific NeuronDB instances
+ * AI Sender - Handles communication with NeuronDB for AI-specific operations
  */
 class AISender {
     constructor() {
-        this.keysManager = getInstance();
+        this.baseUrl = null;
+        this.aiToken = null;
+        this.timeout = 30000; // 30 seconds
     }
 
     /**
-     * Execute SNL command for specific AI
-     * @param {string} snlCommand - SNL command
-     * @param {string} aiToken - AI-specific token
-     * @returns {Promise<Object>}
-     */
-    async executeSNL(snlCommand, aiToken) {
-        try {
-            // Get AI URL from keys
-            const keysVO = await this.keysManager.getKeysVO();
-
-            // Find AI instance by token
-            let aiUrl = null;
-            for (const aiName of keysVO.getAINames()) {
-                if (keysVO.getAIToken(aiName) === aiToken) {
-                    aiUrl = keysVO.getAIUrl(aiName);
-                    break;
-                }
-            }
-
-            if (!aiUrl) {
-                throw new Error('AI instance not found for provided token');
-            }
-
-            const response = await axios.post(`${aiUrl}/snl`, snlCommand, {
-                headers: {
-                    'Content-Type': 'text/plain',
-                    'Authorization': `Bearer ${aiToken}`
-                },
-                timeout: 30000
-            });
-
-            return response.data;
-        } catch (error) {
-            if (error.response) {
-                // Server responded with error status
-                throw new Error(`SNL execution failed: ${error.response.status} - ${error.response.data?.message || error.response.statusText}`);
-            } else if (error.request) {
-                // Network error
-                throw new Error('SNL execution failed: Network error');
-            } else {
-                // Other error
-                throw new Error(`SNL execution failed: ${error.message}`);
-            }
-        }
-    }
-
-    /**
-     * Create user in AI database
+     * Initialize sender with AI credentials
+     * @param {string} baseUrl - NeuronDB base URL
      * @param {string} aiToken - AI token
-     * @param {string} username - Username
-     * @param {string} password - Password
-     * @param {string} email - Email
-     * @param {Array} groups - User groups
-     * @returns {Promise<Object>}
      */
-    async createUser(aiToken, username, password, email, groups = ['default']) {
+    initialize(baseUrl, aiToken) {
+        this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+        this.aiToken = aiToken;
+    }
+
+    /**
+     * Execute SNL command
+     * @param {string} snlCommand - SNL command to execute
+     * @param {string} token - Token to use (optional, defaults to AI token)
+     * @returns {Promise<Object>} Response data
+     */
+    async executeSNL(snlCommand, token = null) {
         try {
-            // Get AI URL from keys
-            const keysVO = await this.keysManager.getKeysVO();
-
-            let aiUrl = null;
-            for (const aiName of keysVO.getAINames()) {
-                if (keysVO.getAIToken(aiName) === aiToken) {
-                    aiUrl = keysVO.getAIUrl(aiName);
-                    break;
-                }
+            if (!this.baseUrl) {
+                throw new NeuronDBError('AI Sender not initialized');
             }
 
-            if (!aiUrl) {
-                throw new Error('AI instance not found for provided token');
+            const authToken = token || this.aiToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
             }
 
-            const userData = {
-                username,
-                password,
-                email,
-                groups,
-                active: true,
-                createdAt: new Date().toISOString()
-            };
-
-            const response = await axios.post(`${aiUrl}/user/create`, userData, {
+            const response = await axios.post(`${this.baseUrl}/snl`, {
+                command: snlCommand
+            }, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${aiToken}`
+                    'Authorization': `Bearer ${authToken}`
                 },
-                timeout: 30000
+                timeout: this.timeout
             });
 
             return response.data;
+
         } catch (error) {
-            if (error.response) {
-                throw new Error(`User creation failed: ${error.response.status} - ${error.response.data?.message || error.response.statusText}`);
-            } else if (error.request) {
-                throw new Error('User creation failed: Network error');
-            } else {
-                throw new Error(`User creation failed: ${error.message}`);
-            }
+            throw this._handleError(error, 'SNL execution failed');
         }
     }
 
     /**
      * Login user
-     * @param {string} aiToken - AI token
-     * @param {string} username - Username
+     * @param {string} username - Username or email
      * @param {string} password - Password
-     * @returns {Promise<string>} JWT token
+     * @returns {Promise<Object>} Login result with token
      */
-    async login(aiToken, username, password) {
+    async login(username, password) {
         try {
-            // Get AI URL from keys
-            const keysVO = await this.keysManager.getKeysVO();
-
-            let aiUrl = null;
-            for (const aiName of keysVO.getAINames()) {
-                if (keysVO.getAIToken(aiName) === aiToken) {
-                    aiUrl = keysVO.getAIUrl(aiName);
-                    break;
-                }
+            if (!this.baseUrl) {
+                throw new NeuronDBError('AI Sender not initialized');
             }
 
-            if (!aiUrl) {
-                throw new Error('AI instance not found for provided token');
+            if (!username || !password) {
+                throw new ValidationError('Username and password are required');
             }
 
-            const response = await axios.post(`${aiUrl}/auth/login`, {
+            const response = await axios.post(`${this.baseUrl}/auth/login`, {
                 username,
                 password
             }, {
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                timeout: 30000
+                timeout: this.timeout
             });
 
-            return response.data.token;
+            return response.data;
+
         } catch (error) {
-            if (error.response && error.response.status === 401) {
-                throw new Error('Invalid credentials');
-            } else if (error.response) {
-                throw new Error(`Login failed: ${error.response.status} - ${error.response.data?.message || error.response.statusText}`);
-            } else if (error.request) {
-                throw new Error('Login failed: Network error');
-            } else {
-                throw new Error(`Login failed: ${error.message}`);
-            }
+            throw this._handleError(error, 'Login failed');
         }
     }
 
     /**
-     * Validate token
+     * Validate token and get user info
      * @param {string} token - JWT token to validate
      * @returns {Promise<Object>} User information
      */
     async validateToken(token) {
         try {
-            // Extract AI token from the JWT or get from context
-            // For now, we'll need to try each AI until we find the right one
-            const keysVO = await this.keysManager.getKeysVO();
-
-            for (const aiName of keysVO.getAINames()) {
-                try {
-                    const aiUrl = keysVO.getAIUrl(aiName);
-
-                    const response = await axios.post(`${aiUrl}/auth/validate`, {}, {
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        },
-                        timeout: 15000
-                    });
-
-                    return response.data;
-                } catch (error) {
-                    // Try next AI if this one fails
-                    continue;
-                }
+            if (!this.baseUrl) {
+                throw new NeuronDBError('AI Sender not initialized');
             }
 
-            throw new Error('Token validation failed on all AI instances');
+            if (!token) {
+                throw new ValidationError('Token is required');
+            }
+
+            const response = await axios.post(`${this.baseUrl}/auth/validate`, {}, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                timeout: this.timeout
+            });
+
+            return response.data;
+
         } catch (error) {
-            throw new Error(`Token validation failed: ${error.message}`);
+            throw this._handleError(error, 'Token validation failed');
         }
     }
 
     /**
      * Change user password
-     * @param {string} aiToken - AI token
-     * @param {string} username - Username
-     * @param {string} currentPassword - Current password
+     * @param {string} token - User token
      * @param {string} newPassword - New password
-     * @returns {Promise<boolean>}
+     * @returns {Promise<Object>} Success result
      */
-    async changePassword(aiToken, username, currentPassword, newPassword) {
+    async changePassword(token, newPassword) {
         try {
-            // Get AI URL from keys
-            const keysVO = await this.keysManager.getKeysVO();
-
-            let aiUrl = null;
-            for (const aiName of keysVO.getAINames()) {
-                if (keysVO.getAIToken(aiName) === aiToken) {
-                    aiUrl = keysVO.getAIUrl(aiName);
-                    break;
-                }
+            if (!this.baseUrl) {
+                throw new NeuronDBError('AI Sender not initialized');
             }
 
-            if (!aiUrl) {
-                throw new Error('AI instance not found for provided token');
+            if (!token || !newPassword) {
+                throw new ValidationError('Token and new password are required');
             }
 
-            const response = await axios.post(`${aiUrl}/auth/change-password`, {
-                username,
-                currentPassword,
+            const response = await axios.post(`${this.baseUrl}/auth/changepwd`, {
                 newPassword
             }, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${aiToken}`
+                    'Authorization': `Bearer ${token}`
                 },
-                timeout: 30000
+                timeout: this.timeout
             });
 
-            return response.data.success || true;
+            return response.data;
+
         } catch (error) {
-            if (error.response) {
-                throw new Error(`Password change failed: ${error.response.status} - ${error.response.data?.message || error.response.statusText}`);
-            } else if (error.request) {
-                throw new Error('Password change failed: Network error');
-            } else {
-                throw new Error(`Password change failed: ${error.message}`);
-            }
+            throw this._handleError(error, 'Password change failed');
         }
     }
 
     /**
-     * Create database
-     * @param {string} aiToken - AI token (must be admin)
-     * @param {string} databaseName - Database name
-     * @returns {Promise<boolean>}
+     * Create new user
+     * @param {string} adminToken - Admin token (optional for system operations)
+     * @param {Object} userData - User data
+     * @returns {Promise<Object>} Creation result
      */
-    async createDatabase(aiToken, databaseName) {
+    async createUser(adminToken, userData) {
         try {
-            // Get AI URL from keys
-            const keysVO = await this.keysManager.getKeysVO();
-
-            let aiUrl = null;
-            for (const aiName of keysVO.getAINames()) {
-                if (keysVO.getAIToken(aiName) === aiToken) {
-                    aiUrl = keysVO.getAIUrl(aiName);
-                    break;
-                }
+            if (!this.baseUrl) {
+                throw new NeuronDBError('AI Sender not initialized');
             }
 
-            if (!aiUrl) {
-                throw new Error('AI instance not found for provided token');
+            if (!userData || !userData.email || !userData.password) {
+                throw new ValidationError('User data with email and password are required');
             }
 
-            const response = await axios.post(`${aiUrl}/database/create`, {
+            const requestData = {
+                email: userData.email,
+                password: userData.password,
+                nick: userData.nick || userData.email.split('@')[0],
+                permissions: userData.permissions || {}
+            };
+
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            // Use admin token if provided, otherwise use AI token for system operations
+            const authToken = adminToken || this.aiToken;
+            if (authToken) {
+                headers.Authorization = `Bearer ${authToken}`;
+            }
+
+            const response = await axios.post(`${this.baseUrl}/auth/createuser`, requestData, {
+                headers,
+                timeout: this.timeout
+            });
+
+            return response.data;
+
+        } catch (error) {
+            throw this._handleError(error, 'User creation failed');
+        }
+    }
+
+    /**
+     * Get user permissions
+     * @param {string} token - User token
+     * @returns {Promise<Object>} User permissions
+     */
+    async getUserPermissions(token) {
+        try {
+            if (!this.baseUrl) {
+                throw new NeuronDBError('AI Sender not initialized');
+            }
+
+            if (!token) {
+                throw new ValidationError('Token is required');
+            }
+
+            const response = await axios.get(`${this.baseUrl}/auth/permissions`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
+                timeout: this.timeout
+            });
+
+            return response.data;
+
+        } catch (error) {
+            throw this._handleError(error, 'Get permissions failed');
+        }
+    }
+
+    /**
+     * Set user permissions
+     * @param {string} adminToken - Admin token
+     * @param {string} userEmail - User email
+     * @param {Object} permissions - Permissions object
+     * @returns {Promise<Object>} Success result
+     */
+    async setUserPermissions(adminToken, userEmail, permissions) {
+        try {
+            if (!this.baseUrl) {
+                throw new NeuronDBError('AI Sender not initialized');
+            }
+
+            if (!adminToken || !userEmail || !permissions) {
+                throw new ValidationError('Admin token, user email, and permissions are required');
+            }
+
+            const response = await axios.post(`${this.baseUrl}/auth/setpermissions`, {
+                email: userEmail,
+                permissions
+            }, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${adminToken}`
+                },
+                timeout: this.timeout
+            });
+
+            return response.data;
+
+        } catch (error) {
+            throw this._handleError(error, 'Set permissions failed');
+        }
+    }
+
+    /**
+     * Create database (admin operation)
+     * @param {string} databaseName - Database name
+     * @param {string} adminToken - Admin token (optional, uses AI token if not provided)
+     * @returns {Promise<Object>} Response data
+     */
+    async createDatabase(databaseName, adminToken = null) {
+        try {
+            if (!this.baseUrl) {
+                throw new NeuronDBError('AI Sender not initialized');
+            }
+
+            const authToken = adminToken || this.aiToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
+            }
+
+            const response = await axios.post(`${this.baseUrl}/db/create`, {
                 name: databaseName
             }, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${aiToken}`
+                    'Authorization': `Bearer ${authToken}`
                 },
-                timeout: 30000
+                timeout: this.timeout
             });
 
-            return response.data.success || true;
+            return response.data;
+
         } catch (error) {
-            if (error.response) {
-                throw new Error(`Database creation failed: ${error.response.status} - ${error.response.data?.message || error.response.statusText}`);
-            } else if (error.request) {
-                throw new Error('Database creation failed: Network error');
-            } else {
-                throw new Error(`Database creation failed: ${error.message}`);
-            }
+            throw this._handleError(error, 'Create database failed');
         }
     }
 
     /**
-     * Delete database
-     * @param {string} aiToken - AI token (must be admin)
+     * Create namespace (admin operation)
      * @param {string} databaseName - Database name
-     * @returns {Promise<boolean>}
+     * @param {string} namespaceName - Namespace name
+     * @param {string} adminToken - Admin token (optional, uses AI token if not provided)
+     * @returns {Promise<Object>} Response data
      */
-    async deleteDatabase(aiToken, databaseName) {
+    async createNamespace(databaseName, namespaceName, adminToken = null) {
         try {
-            // Get AI URL from keys
-            const keysVO = await this.keysManager.getKeysVO();
-
-            let aiUrl = null;
-            for (const aiName of keysVO.getAINames()) {
-                if (keysVO.getAIToken(aiName) === aiToken) {
-                    aiUrl = keysVO.getAIUrl(aiName);
-                    break;
-                }
+            if (!this.baseUrl) {
+                throw new NeuronDBError('AI Sender not initialized');
             }
 
-            if (!aiUrl) {
-                throw new Error('AI instance not found for provided token');
+            const authToken = adminToken || this.aiToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
             }
 
-            const response = await axios.delete(`${aiUrl}/database/${databaseName}`, {
+            const response = await axios.post(`${this.baseUrl}/namespace/create`, {
+                database: databaseName,
+                name: namespaceName
+            }, {
                 headers: {
-                    'Authorization': `Bearer ${aiToken}`
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
                 },
-                timeout: 30000
+                timeout: this.timeout
             });
 
-            return response.data.success || true;
+            return response.data;
+
         } catch (error) {
-            if (error.response) {
-                throw new Error(`Database deletion failed: ${error.response.status} - ${error.response.data?.message || error.response.statusText}`);
-            } else if (error.request) {
-                throw new Error('Database deletion failed: Network error');
-            } else {
-                throw new Error(`Database deletion failed: ${error.message}`);
-            }
+            throw this._handleError(error, 'Create namespace failed');
         }
     }
 
     /**
-     * List databases
-     * @param {string} aiToken - AI token
-     * @returns {Promise<Array>}
+     * Test connection to NeuronDB
+     * @returns {Promise<boolean>} True if connection is successful
      */
-    async listDatabases(aiToken) {
+    async testConnection() {
         try {
-            // Get AI URL from keys
-            const keysVO = await this.keysManager.getKeysVO();
-
-            let aiUrl = null;
-            for (const aiName of keysVO.getAINames()) {
-                if (keysVO.getAIToken(aiName) === aiToken) {
-                    aiUrl = keysVO.getAIUrl(aiName);
-                    break;
-                }
+            if (!this.baseUrl) {
+                return false;
             }
 
-            if (!aiUrl) {
-                throw new Error('AI instance not found for provided token');
-            }
-
-            const response = await axios.get(`${aiUrl}/database/list`, {
-                headers: {
-                    'Authorization': `Bearer ${aiToken}`
-                },
-                timeout: 30000
+            const response = await axios.get(`${this.baseUrl}/health`, {
+                timeout: 5000 // Shorter timeout for health check
             });
 
-            return response.data.databases || [];
+            return response.status === 200;
+
         } catch (error) {
-            if (error.response) {
-                throw new Error(`Database list failed: ${error.response.status} - ${error.response.data?.message || error.response.statusText}`);
-            } else if (error.request) {
-                throw new Error('Database list failed: Network error');
-            } else {
-                throw new Error(`Database list failed: ${error.message}`);
-            }
+            console.warn('NeuronDB AI connection test failed:', error.message);
+            return false;
         }
+    }
+
+    /**
+     * Handle axios errors consistently
+     * @private
+     */
+    _handleError(error, contextMessage = 'Operation failed') {
+        if (error.response) {
+            // Server responded with error status
+            const status = error.response.status;
+            const message = error.response.data?.message || error.response.statusText;
+
+            if (status === 401) {
+                return new AuthenticationError(`${contextMessage}: ${message}`);
+            } else if (status === 400) {
+                return new ValidationError(`${contextMessage}: ${message}`);
+            } else if (status === 404) {
+                return new NeuronDBError(`${contextMessage}: Resource not found - ${message}`);
+            } else if (status === 403) {
+                return new AuthenticationError(`${contextMessage}: Permission denied - ${message}`);
+            } else {
+                return new NeuronDBError(`${contextMessage}: Server error (${status}) - ${message}`);
+            }
+        } else if (error.request) {
+            // Request was made but no response received
+            return new NeuronDBError(`${contextMessage}: No response from NeuronDB server`);
+        } else {
+            // Something else happened
+            return new NeuronDBError(`${contextMessage}: ${error.message}`);
+        }
+    }
+
+    /**
+     * Set timeout for requests
+     * @param {number} timeout - Timeout in milliseconds
+     */
+    setTimeout(timeout) {
+        this.timeout = timeout;
+    }
+
+    /**
+     * Get current configuration
+     * @returns {Object} Current configuration
+     */
+    getConfig() {
+        return {
+            baseUrl: this.baseUrl,
+            hasToken: !!this.aiToken,
+            timeout: this.timeout
+        };
+    }
+
+    /**
+     * Update AI token
+     * @param {string} newToken - New AI token
+     */
+    updateToken(newToken) {
+        this.aiToken = newToken;
     }
 }
 

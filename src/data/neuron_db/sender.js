@@ -1,374 +1,373 @@
 // src/data/neuron_db/sender.js
 
 const axios = require('axios');
+const { NeuronDBError, AuthenticationError, ValidationError } = require('../../cross/entity/errors');
 
 /**
- * NeuronDB Sender - HTTP client for NeuronDB operations
+ * NeuronDB Sender - Handles communication with NeuronDB for config operations
  */
 class NeuronDBSender {
-    constructor(baseUrl) {
-        this.baseUrl = baseUrl || 'https://ndb.archoffice.tech';
-        this.client = axios.create({
-            baseURL: this.baseUrl,
-            timeout: 30000,
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
+    constructor() {
+        this.baseUrl = null;
+        this.configToken = null;
+        this.timeout = 30000; // 30 seconds
+    }
+
+    /**
+     * Initialize sender with config credentials
+     * @param {string} baseUrl - NeuronDB base URL
+     * @param {string} configToken - Config token
+     */
+    initialize(baseUrl, configToken) {
+        this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+        this.configToken = configToken;
     }
 
     /**
      * Execute SNL command
      * @param {string} snlCommand - SNL command to execute
-     * @param {string} token - JWT token
-     * @returns {Promise<Object>}
+     * @param {string} token - Token to use (defaults to config token)
+     * @returns {Promise<Object>} Response data
      */
-    async executeSNL(snlCommand, token) {
+    async executeSNL(snlCommand, token = null) {
         try {
-            const response = await this.client.post('/snl', snlCommand, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'text/plain'
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
+            if (!this.baseUrl) {
+                throw new NeuronDBError('Sender not initialized');
+            }
 
-    /**
-     * Login to NeuronDB
-     * @param {string} instance - AI instance name
-     * @param {string} username - User email
-     * @param {string} password - User password
-     * @returns {Promise<string>} JWT token
-     */
-    async login(instance, username, password) {
-        try {
-            const response = await this.client.post(`/auth/${instance}`, {
-                username,
-                password
-            });
-            return response.data; // Should return JWT token
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
+            const authToken = token || this.configToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
+            }
 
-    /**
-     * Validate token and get permissions
-     * @param {string} token - JWT token
-     * @returns {Promise<Object>} Token validation response
-     */
-    async validateToken(token) {
-        try {
-            const response = await this.client.get('/validate', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
-
-    /**
-     * Create or update user
-     * @param {string} token - JWT token (admin)
-     * @param {Object} userData - User data
-     * @returns {Promise<Object>}
-     */
-    async setUser(token, userData) {
-        try {
-            const response = await this.client.post('/set_user', userData, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
-
-    /**
-     * Change password
-     * @param {string} token - JWT token
-     * @param {string} newPassword - New password
-     * @returns {Promise<Object>}
-     */
-    async changePassword(token, newPassword) {
-        try {
-            const response = await this.client.post('/change_password', {
-                new_password: newPassword
+            const response = await axios.post(`${this.baseUrl}/snl`, {
+                command: snlCommand
             }, {
                 headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
-
-    /**
-     * Remove user
-     * @param {string} token - JWT token (admin)
-     * @param {string} email - User email to remove
-     * @returns {Promise<Object>}
-     */
-    async removeUser(token, email) {
-        try {
-            const response = await this.client.delete(`/remove_user/${email}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
-
-    /**
-     * View user details
-     * @param {string} token - JWT token (admin)
-     * @param {string} email - User email
-     * @returns {Promise<Object>}
-     */
-    async viewUser(token, email) {
-        try {
-            const response = await this.client.get(`/view_user/${email}`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
-
-    /**
-     * List all users
-     * @param {string} token - JWT token (admin)
-     * @returns {Promise<Array>}
-     */
-    async listUsers(token) {
-        try {
-            const response = await this.client.get('/list_users', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
-
-    /**
-     * Remove user permission
-     * @param {string} token - JWT token (admin)
-     * @param {string} email - User email
-     * @param {string} database - Database name
-     * @returns {Promise<Object>}
-     */
-    async removePermission(token, email, database) {
-        try {
-            const response = await this.client.delete('/permission/remove', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
                 },
-                data: {
-                    email,
-                    database
-                }
+                timeout: this.timeout
             });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
 
-    /**
-     * Set user permission
-     * @param {string} token - JWT token (admin)
-     * @param {string} email - User email
-     * @param {string} database - Database name
-     * @param {number} level - Permission level (1-3)
-     * @returns {Promise<Object>}
-     */
-    async setPermission(token, email, database, level) {
-        try {
-            const response = await this.client.post('/permission/set', {
-                email,
-                database,
-                level
-            }, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
             return response.data;
+
         } catch (error) {
-            throw this._handleError(error);
+            if (error.response) {
+                // Server responded with error status
+                const status = error.response.status;
+                const message = error.response.data?.message || error.response.statusText;
+
+                if (status === 401) {
+                    throw new AuthenticationError(`Authentication failed: ${message}`);
+                } else if (status === 400) {
+                    throw new ValidationError(`Invalid request: ${message}`);
+                } else if (status === 404) {
+                    throw new NeuronDBError(`Resource not found: ${message}`);
+                } else {
+                    throw new NeuronDBError(`Server error (${status}): ${message}`);
+                }
+            } else if (error.request) {
+                // Request was made but no response received
+                throw new NeuronDBError('No response from NeuronDB server');
+            } else {
+                // Something else happened
+                throw new NeuronDBError(`Request error: ${error.message}`);
+            }
         }
     }
 
     /**
      * Create database
-     * @param {string} token - JWT token (admin)
-     * @param {string} dbName - Database name
-     * @returns {Promise<Object>}
+     * @param {string} databaseName - Database name
+     * @param {string} token - Token to use
+     * @returns {Promise<Object>} Response data
      */
-    async createDatabase(token, dbName) {
+    async createDatabase(databaseName, token = null) {
         try {
-            const response = await this.client.post('/db/create', {
-                db_name: dbName
+            if (!this.baseUrl) {
+                throw new NeuronDBError('Sender not initialized');
+            }
+
+            const authToken = token || this.configToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
+            }
+
+            const response = await axios.post(`${this.baseUrl}/db/create`, {
+                name: databaseName
             }, {
                 headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                timeout: this.timeout
             });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
 
-    /**
-     * List databases
-     * @param {string} token - JWT token (admin)
-     * @returns {Promise<Object>}
-     */
-    async listDatabases(token) {
-        try {
-            const response = await this.client.get('/db/list', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
             return response.data;
+
         } catch (error) {
-            throw this._handleError(error);
+            throw this._handleError(error, 'Create database failed');
         }
     }
 
     /**
      * Drop database
-     * @param {string} token - JWT token (admin)
-     * @param {string} dbName - Database name
-     * @returns {Promise<Object>}
+     * @param {string} databaseName - Database name
+     * @param {string} token - Token to use
+     * @returns {Promise<Object>} Response data
      */
-    async dropDatabase(token, dbName) {
+    async dropDatabase(databaseName, token = null) {
         try {
-            const response = await this.client.delete('/db/drop', {
+            if (!this.baseUrl) {
+                throw new NeuronDBError('Sender not initialized');
+            }
+
+            const authToken = token || this.configToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
+            }
+
+            const response = await axios.post(`${this.baseUrl}/db/drop`, {
+                name: databaseName
+            }, {
                 headers: {
-                    'Authorization': `Bearer ${token}`
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
                 },
-                data: {
-                    db_name: dbName
-                }
+                timeout: this.timeout
             });
+
             return response.data;
+
         } catch (error) {
-            throw this._handleError(error);
+            throw this._handleError(error, 'Drop database failed');
+        }
+    }
+
+    /**
+     * List databases
+     * @param {string} token - Token to use
+     * @returns {Promise<Array>} Array of database names
+     */
+    async listDatabases(token = null) {
+        try {
+            if (!this.baseUrl) {
+                throw new NeuronDBError('Sender not initialized');
+            }
+
+            const authToken = token || this.configToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
+            }
+
+            const response = await axios.get(`${this.baseUrl}/db/list`, {
+                headers: {
+                    'Authorization': `Bearer ${authToken}`
+                },
+                timeout: this.timeout
+            });
+
+            return response.data;
+
+        } catch (error) {
+            throw this._handleError(error, 'List databases failed');
         }
     }
 
     /**
      * Create namespace
-     * @param {string} token - JWT token (admin)
-     * @param {string} dbName - Database name
+     * @param {string} databaseName - Database name
      * @param {string} namespaceName - Namespace name
-     * @returns {Promise<Object>}
+     * @param {string} token - Token to use
+     * @returns {Promise<Object>} Response data
      */
-    async createNamespace(token, dbName, namespaceName) {
+    async createNamespace(databaseName, namespaceName, token = null) {
         try {
-            const response = await this.client.post('/namespace/create', {
-                db_name: dbName,
-                namespace_name: namespaceName
+            if (!this.baseUrl) {
+                throw new NeuronDBError('Sender not initialized');
+            }
+
+            const authToken = token || this.configToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
+            }
+
+            const response = await axios.post(`${this.baseUrl}/namespace/create`, {
+                database: databaseName,
+                name: namespaceName
             }, {
                 headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw this._handleError(error);
-        }
-    }
-
-    /**
-     * List namespaces
-     * @param {string} token - JWT token (admin)
-     * @param {string} dbName - Database name
-     * @returns {Promise<Object>}
-     */
-    async listNamespaces(token, dbName) {
-        try {
-            const response = await this.client.get('/namespace/list', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
                 },
-                params: {
-                    db_name: dbName
-                }
+                timeout: this.timeout
             });
+
             return response.data;
+
         } catch (error) {
-            throw this._handleError(error);
+            throw this._handleError(error, 'Create namespace failed');
         }
     }
 
     /**
      * Drop namespace
-     * @param {string} token - JWT token (admin)
-     * @param {string} dbName - Database name
+     * @param {string} databaseName - Database name
      * @param {string} namespaceName - Namespace name
-     * @returns {Promise<Object>}
+     * @param {string} token - Token to use
+     * @returns {Promise<Object>} Response data
      */
-    async dropNamespace(token, dbName, namespaceName) {
+    async dropNamespace(databaseName, namespaceName, token = null) {
         try {
-            const response = await this.client.delete('/namespace/drop', {
+            if (!this.baseUrl) {
+                throw new NeuronDBError('Sender not initialized');
+            }
+
+            const authToken = token || this.configToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
+            }
+
+            const response = await axios.post(`${this.baseUrl}/namespace/drop`, {
+                database: databaseName,
+                name: namespaceName
+            }, {
                 headers: {
-                    'Authorization': `Bearer ${token}`
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
                 },
-                data: {
-                    db_name: dbName,
-                    namespace_name: namespaceName
-                }
+                timeout: this.timeout
             });
+
             return response.data;
+
         } catch (error) {
-            throw this._handleError(error);
+            throw this._handleError(error, 'Drop namespace failed');
         }
     }
 
     /**
-     * Handle errors uniformly
-     * @param {Error} error
-     * @returns {Error}
+     * List namespaces
+     * @param {string} databaseName - Database name
+     * @param {string} token - Token to use
+     * @returns {Promise<Array>} Array of namespace names
      */
-    _handleError(error) {
+    async listNamespaces(databaseName, token = null) {
+        try {
+            if (!this.baseUrl) {
+                throw new NeuronDBError('Sender not initialized');
+            }
+
+            const authToken = token || this.configToken;
+            if (!authToken) {
+                throw new AuthenticationError('No authentication token available');
+            }
+
+            const response = await axios.get(`${this.baseUrl}/namespace/list`, {
+                params: { database: databaseName },
+                headers: {
+                    'Authorization': `Bearer ${authToken}`
+                },
+                timeout: this.timeout
+            });
+
+            return response.data;
+
+        } catch (error) {
+            throw this._handleError(error, 'List namespaces failed');
+        }
+    }
+
+    /**
+     * Test connection to NeuronDB
+     * @returns {Promise<boolean>} True if connection is successful
+     */
+    async testConnection() {
+        try {
+            if (!this.baseUrl) {
+                throw new NeuronDBError('Sender not initialized');
+            }
+
+            const response = await axios.get(`${this.baseUrl}/health`, {
+                timeout: 5000 // Shorter timeout for health check
+            });
+
+            return response.status === 200;
+
+        } catch (error) {
+            console.warn('NeuronDB connection test failed:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * Get server info
+     * @returns {Promise<Object>} Server information
+     */
+    async getServerInfo() {
+        try {
+            if (!this.baseUrl) {
+                throw new NeuronDBError('Sender not initialized');
+            }
+
+            const response = await axios.get(`${this.baseUrl}/info`, {
+                timeout: 5000
+            });
+
+            return response.data;
+
+        } catch (error) {
+            throw this._handleError(error, 'Get server info failed');
+        }
+    }
+
+    /**
+     * Handle axios errors consistently
+     * @private
+     */
+    _handleError(error, contextMessage = 'Operation failed') {
         if (error.response) {
-            // Server responded with error
+            // Server responded with error status
+            const status = error.response.status;
             const message = error.response.data?.message || error.response.statusText;
-            const err = new Error(`NeuronDB Error: ${message}`);
-            err.statusCode = error.response.status;
-            err.data = error.response.data;
-            return err;
+
+            if (status === 401) {
+                return new AuthenticationError(`${contextMessage}: ${message}`);
+            } else if (status === 400) {
+                return new ValidationError(`${contextMessage}: ${message}`);
+            } else if (status === 404) {
+                return new NeuronDBError(`${contextMessage}: Resource not found - ${message}`);
+            } else {
+                return new NeuronDBError(`${contextMessage}: Server error (${status}) - ${message}`);
+            }
         } else if (error.request) {
-            // Request made but no response
-            return new Error('NeuronDB: No response from server');
+            // Request was made but no response received
+            return new NeuronDBError(`${contextMessage}: No response from NeuronDB server`);
         } else {
             // Something else happened
-            return error;
+            return new NeuronDBError(`${contextMessage}: ${error.message}`);
         }
+    }
+
+    /**
+     * Set timeout for requests
+     * @param {number} timeout - Timeout in milliseconds
+     */
+    setTimeout(timeout) {
+        this.timeout = timeout;
+    }
+
+    /**
+     * Get current configuration
+     * @returns {Object} Current configuration
+     */
+    getConfig() {
+        return {
+            baseUrl: this.baseUrl,
+            hasToken: !!this.configToken,
+            timeout: this.timeout
+        };
     }
 }
 

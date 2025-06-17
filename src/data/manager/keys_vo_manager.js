@@ -174,6 +174,18 @@ function getInstance() {
     return instance;
 }
 
-// Export the class and the getInstance function
-module.exports = KeysVOManager;
-module.exports.getInstance = getInstance;
+/**
+ * Initialize KeysVO Manager (convenience function)
+ * @returns {Promise<KeysVO>}
+ */
+async function initialize() {
+    const manager = getInstance();
+    return await manager.initialize();
+}
+
+// Export functions and class
+module.exports = {
+    KeysVOManager,
+    getInstance,
+    initialize
+};

@@ -1,136 +1,128 @@
 // src/data/snl/user_group_snl.js
 
 /**
- * UserGroupSNL - SNL commands for UserGroup entity operations
+ * User Group SNL - Group management SNL commands
  */
 class UserGroupSNL {
     constructor() {
-        this.namespace = 'main.core';
-        this.entityName = 'usergroups';
+        this.entityName = 'usergroup';
     }
 
     /**
-     * Check if usergroups structure exists
-     * @returns {string}
-     */
-    checkGroupsStructureExistsSNL() {
-        return `list(structure)\nvalues("${this.entityName}")\non(${this.namespace})`;
-    }
-
-    /**
-     * Create usergroups structure if not exists
-     * @returns {string}
-     */
-    createGroupsStructureSNL() {
-        return `set(structure)\nvalues("${this.entityName}", {})\non(${this.namespace}.${this.entityName})`;
-    }
-
-    /**
-     * Set user group SNL
-     * @param {string} groupName - Group name
+     * Generate create group SNL command
      * @param {Object} groupData - Group data
-     * @returns {string}
+     * @returns {string} SNL command
      */
-    setGroupSNL(groupName, groupData) {
-        return `set(structure)\nvalues("${groupName}", ${JSON.stringify(groupData)})\non(${this.namespace}.${this.entityName})`;
-    }
+    generateCreateGroupSNL(groupData) {
+        const { name, description, permissions = [], isHidden = false, isSystem = false } = groupData;
 
-    /**
-     * Get user group SNL
-     * @param {string} groupName - Group name
-     * @returns {string}
-     */
-    getGroupSNL(groupName) {
-        return `view(structure)\nvalues("${groupName}")\non(${this.namespace}.${this.entityName})`;
-    }
-
-    /**
-     * List user groups SNL
-     * @returns {string}
-     */
-    listGroupsSNL() {
-        return `list(structure)\nvalues("*")\non(${this.namespace}.${this.entityName})`;
-    }
-
-    /**
-     * Remove user group SNL
-     * @param {string} groupName - Group name
-     * @returns {string}
-     */
-    removeGroupSNL(groupName) {
-        return `remove(structure)\nvalues("${groupName}")\non(${this.namespace}.${this.entityName})`;
-    }
-
-    /**
-     * Search groups SNL
-     * @param {string} searchTerm - Search term
-     * @returns {string}
-     */
-    searchGroupsSNL(searchTerm) {
-        return `search(structure)\nvalues("${searchTerm}")\non(${this.namespace}.${this.entityName})`;
-    }
-
-    /**
-     * Build group data for storage
-     * @param {UserGroup} group - UserGroup entity
-     * @returns {Object}
-     */
-    buildGroupData(group) {
-        return {
-            id: group.id,
-            name: group.name,
-            description: group.description,
-            permissions: group.permissions,
-            isHidden: group.isHidden,
-            isSystem: group.isSystem,
-            aiName: group.aiName,
-            createdAt: group.createdAt,
-            updatedAt: group.updatedAt
+        const groupObject = {
+            name,
+            description,
+            permissions,
+            isHidden,
+            isSystem,
+            members: [],
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
         };
+
+        return `set(structure)\nvalues("${this.entityName}", ${JSON.stringify(groupObject)})\non(main.core.${name})`;
     }
 
     /**
-     * Parse structure exists response
-     * @param {Object} response - SNL response
-     * @returns {boolean}
+     * Generate get group SNL command
+     * @param {string} groupName - Group name
+     * @returns {string} SNL command
      */
-    parseStructureExistsResponse(response) {
-        if (!response || typeof response !== 'object') {
-            return false;
-        }
-
-        // If usergroups entity exists, response should contain it
-        return Object.prototype.hasOwnProperty.call(response, this.entityName);
+    generateGetGroupSNL(groupName) {
+        return `view(structure)\nvalues("${this.entityName}")\non(main.core.${groupName})`;
     }
 
     /**
-     * Parse groups list response
-     * @param {Object} response - SNL response
-     * @returns {Array<string>}
+     * Generate list groups SNL command
+     * @param {boolean} includeHidden - Include hidden groups
+     * @returns {string} SNL command
      */
-    parseGroupsList(response) {
-        if (!response || typeof response !== 'object') {
-            return [];
+    generateListGroupsSNL(includeHidden = false) {
+        if (includeHidden) {
+            return `list(structure)\nvalues("${this.entityName}")\non(main.core)`;
+        } else {
+            return `search(structure)\nvalues("${this.entityName}")\nmatch("isHidden", false)\non(main.core)`;
         }
-
-        // Extract group names from response, excluding the entity name itself
-        return Object.keys(response).filter(key => key !== this.entityName);
     }
 
     /**
-     * Parse group data response
+     * Generate add member to group SNL command
+     * @param {string} groupName - Group name
+     * @param {string} userEmail - User email to add
+     * @returns {string} SNL command
+     */
+    generateAddMemberSNL(groupName, userEmail) {
+        // First get current group data, then update with new member
+        return `view(structure)\nvalues("${this.entityName}")\non(main.core.${groupName})`;
+    }
+
+    /**
+     * Generate update group with new member SNL command
+     * @param {string} groupName - Group name
+     * @param {Array} updatedMembers - Updated members array
+     * @returns {string} SNL command
+     */
+    generateUpdateGroupMembersSNL(groupName, updatedMembers) {
+        const updateData = {
+            members: updatedMembers,
+            updated_at: new Date().toISOString()
+        };
+
+        return `set(structure)\nvalues("${this.entityName}", ${JSON.stringify(updateData)})\non(main.core.${groupName})`;
+    }
+
+    /**
+     * Generate remove member from group SNL command
+     * @param {string} groupName - Group name
+     * @param {string} userEmail - User email to remove
+     * @returns {string} SNL command
+     */
+    generateRemoveMemberSNL(groupName, userEmail) {
+        // First get current group data, then update without the member
+        return `view(structure)\nvalues("${this.entityName}")\non(main.core.${groupName})`;
+    }
+
+    /**
+     * Generate delete group SNL command
+     * @param {string} groupName - Group name
+     * @returns {string} SNL command
+     */
+    generateDeleteGroupSNL(groupName) {
+        return `remove(structure)\nvalues("${this.entityName}")\non(main.core.${groupName})`;
+    }
+
+    /**
+     * Generate get user groups SNL command
+     * @param {string} userEmail - User email
+     * @returns {string} SNL command
+     */
+    generateGetUserGroupsSNL(userEmail) {
+        return `search(structure)\nvalues("${this.entityName}")\nmatch("members", "${userEmail}")\non(main.core)`;
+    }
+
+    /**
+     * Parse group data from SNL response
      * @param {Object} response - SNL response
-     * @returns {Object}
+     * @returns {Object|null} Group data
      */
     parseGroupData(response) {
         if (!response || typeof response !== 'object') {
             return null;
         }
 
-        // Return the first non-entity object found
+        // Look for group data in the response
         for (const [key, value] of Object.entries(response)) {
             if (key !== this.entityName && typeof value === 'object' && value !== null) {
-                return value;
+                if (value.name) {
+                    return value;
+                }
             }
         }
 
@@ -138,35 +130,121 @@ class UserGroupSNL {
     }
 
     /**
-     * Validate group name
-     * @param {string} groupName - Group name to validate
-     * @throws {Error} If group name is invalid
+     * Parse groups list from SNL response
+     * @param {Object} response - SNL response
+     * @returns {Array} Array of groups
      */
-    validateGroupName(groupName) {
-        if (!groupName || typeof groupName !== 'string') {
-            throw new Error('Group name must be a non-empty string');
+    parseGroupsList(response) {
+        const groups = [];
+
+        if (!response || typeof response !== 'object') {
+            return groups;
         }
 
-        if (groupName.length > 50) {
-            throw new Error('Group name must be 50 characters or less');
+        for (const [key, value] of Object.entries(response)) {
+            if (key !== this.entityName && typeof value === 'object' && value !== null) {
+                if (value.name) {
+                    groups.push(value);
+                }
+            }
         }
 
-        // Check for valid characters (alphanumeric, underscore, hyphen)
-        const validNamePattern = /^[a-zA-Z0-9_-]+$/;
-        if (!validNamePattern.test(groupName)) {
-            throw new Error('Group name can only contain letters, numbers, underscores, and hyphens');
+        return groups;
+    }
+
+    /**
+     * Get default system groups
+     * @returns {Array} Default groups
+     */
+    getDefaultSystemGroups() {
+        return [
+            {
+                name: 'subscription_admin',
+                description: 'System group for payment gateway integration',
+                permissions: [
+                    'subscription.create',
+                    'subscription.cancel',
+                    'subscription.change_plan',
+                    'subscription.view_all'
+                ],
+                isHidden: true,
+                isSystem: true
+            },
+            {
+                name: 'admin',
+                description: 'Administrators who purchase AI subscriptions',
+                permissions: [
+                    'user.create',
+                    'user.delete',
+                    'user.update',
+                    'user.view_all',
+                    'config.update_theme',
+                    'config.update_behavior',
+                    'subscription.cancel',
+                    'subscription.change_plan',
+                    'database.view',
+                    'namespace.view'
+                ],
+                isHidden: false,
+                isSystem: true
+            },
+            {
+                name: 'default',
+                description: 'Default users of the AI',
+                permissions: [
+                    'ai.chat',
+                    'ai.command_execute',
+                    'timeline.view_own',
+                    'timeline.create',
+                    'user_data.view_own',
+                    'user_data.create_own',
+                    'user_data.update_own'
+                ],
+                isHidden: false,
+                isSystem: true
+            }
+        ];
+    }
+
+    /**
+     * Validate group data
+     * @param {Object} groupData - Group data to validate
+     * @returns {Array} Array of validation errors
+     */
+    validateGroupData(groupData) {
+        const errors = [];
+
+        if (!groupData.name || typeof groupData.name !== 'string') {
+            errors.push('Group name is required and must be a string');
+        } else if (groupData.name.length < 2) {
+            errors.push('Group name must be at least 2 characters long');
+        } else if (!/^[a-zA-Z0-9_-]+$/.test(groupData.name)) {
+            errors.push('Group name can only contain letters, numbers, underscores, and hyphens');
         }
+
+        if (!groupData.description || typeof groupData.description !== 'string') {
+            errors.push('Group description is required and must be a string');
+        }
+
+        if (groupData.permissions && !Array.isArray(groupData.permissions)) {
+            errors.push('Permissions must be an array');
+        }
+
+        return errors;
     }
 
     /**
      * Get default subscription admin credentials
-     * @returns {Object}
+     * @returns {Object} Default credentials
      */
     getDefaultSubscriptionAdminCredentials() {
         return {
-            username: 'subscription_admin',
+            email: 'subscription_admin@system.local',
             password: 'sudo_subscription_admin',
-            email: 'subscription_admin@system.local'
+            nick: 'Subscription Admin',
+            permissions: {
+                main: 5 // Admin level
+            }
         };
     }
 }

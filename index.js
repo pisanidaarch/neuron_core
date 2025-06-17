@@ -4,8 +4,10 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
-// Import initializer
+// Import initializers
 const DatabaseInitializer = require('./src/data/initializer/database_initializer');
+const SecurityInitializer = require('./src/data/initializer/security_initializer');
+const StartupBanner = require('./src/utils/startup_banner');
 
 // Import route modules
 const securityRoutes = require('./src/api/security/routes');
@@ -43,6 +45,9 @@ class NeuronCore {
             // Initialize databases
             await this._initializeDatabases();
 
+            // Initialize security
+            await this._initializeSecurity();
+
             this.initialized = true;
             console.log('✅ NeuronCore initialized successfully');
 
@@ -61,10 +66,8 @@ class NeuronCore {
             console.log('   🔑 Initializing KeysVO...');
 
             // Use KeysVOManager to properly initialize from config file
-            const { getInstance } = require('./src/data/manager/keys_vo_manager');
-            const keysVOManager = getInstance();
-
-            const keysVO = await keysVOManager.initialize();
+            const { initialize } = require('./src/data/manager/keys_vo_manager');
+            const keysVO = await initialize();
 
             // Validate that we have necessary keys
             const validation = keysVO.validate();
@@ -113,7 +116,7 @@ class NeuronCore {
      * @private
      */
     _setupRoutes() {
-        console.log('   🛣 Setting up routes...');
+        console.log('   🛣  Setting up routes...');
 
         // Health check
         this.app.get('/health', (req, res) => {
@@ -125,8 +128,14 @@ class NeuronCore {
             });
         });
 
-        // API routes
+        // Admin routes
+        this.app.get('/admin/status', this._getAdminStatus.bind(this));
+        this.app.post('/admin/database/initialize', this._reinitializeDatabase.bind(this));
+
+        // Security API routes
         this.app.use('/api/security', securityRoutes);
+
+        // Support API routes
         this.app.use('/api/support', supportRoutes);
 
         // Root endpoint
@@ -135,25 +144,22 @@ class NeuronCore {
                 name: 'NeuronCore',
                 version: '1.0.0',
                 description: 'Multi-AI orchestration platform with workflow capabilities',
-                status: this.initialized ? 'ready' : 'initializing',
-                endpoints: {
-                    health: '/health',
-                    security: '/api/security',
-                    support: '/api/support'
-                }
+                status: this.initialized ? 'initialized' : 'initializing',
+                timestamp: new Date().toISOString(),
+                endpoints: [
+                    '/health',
+                    '/admin/status',
+                    '/api/security/{ai_name}/auth/login',
+                    '/api/security/{ai_name}/auth/validate',
+                    '/api/security/{ai_name}/auth/change-password',
+                    '/api/security/{ai_name}/users/create',
+                    '/api/support/info',
+                    '/api/support/health'
+                ]
             });
         });
 
-        // 404 handler
-        this.app.use('*', (req, res) => {
-            res.status(404).json({
-                error: true,
-                message: 'Endpoint not found',
-                requestedPath: req.originalUrl
-            });
-        });
-
-        // Error handler
+        // Error handling middleware
         this.app.use(ErrorHandler.handleError);
 
         console.log('   ✅ Routes configured');
@@ -165,16 +171,109 @@ class NeuronCore {
      */
     async _initializeDatabases() {
         try {
-            console.log('   💾 Initializing databases...');
+            console.log('   📦 Initializing databases...');
 
-            const initializer = new DatabaseInitializer();
-            await initializer.initializeAll();
+            const dbInitializer = new DatabaseInitializer();
+            await dbInitializer.initializeAll();
 
             console.log('   ✅ Databases initialized');
+
         } catch (error) {
             console.error('   ❌ Failed to initialize databases:', error);
-            // Don't throw error, just warn - databases might already exist
-            console.warn('   ⚠ Continuing without database initialization...');
+            // Don't throw - database initialization might fail if NeuronDB is not available
+            console.warn('   ⚠️  Continuing without database initialization');
+        }
+    }
+
+    /**
+     * Initialize security
+     * @private
+     */
+    async _initializeSecurity() {
+        try {
+            console.log('   🔒 Initializing security...');
+
+            const securityInitializer = new SecurityInitializer();
+            await securityInitializer.initializeAll();
+
+            console.log('   ✅ Security initialized');
+
+        } catch (error) {
+            console.error('   ❌ Failed to initialize security:', error);
+            // Don't throw - security initialization might fail if NeuronDB is not available
+            console.warn('   ⚠️  Continuing without security initialization');
+        }
+    }
+
+    /**
+     * Admin status endpoint
+     * @private
+     */
+    async _getAdminStatus(req, res) {
+        try {
+            const { getInstance } = require('./src/data/manager/keys_vo_manager');
+            const keysManager = getInstance();
+            const keysVO = await keysManager.getKeysVO();
+
+            const status = {
+                initialized: this.initialized,
+                timestamp: new Date().toISOString(),
+                configuration: {
+                    aiInstances: keysVO.getAINames(),
+                    configUrl: keysVO.getConfigUrl() ? 'configured' : 'missing',
+                    jwtSecret: keysVO.getJWTSecret() ? 'configured' : 'missing'
+                },
+                databases: {
+                    // TODO: Add database status check
+                    status: 'unknown'
+                },
+                security: {
+                    // TODO: Add security status check
+                    status: 'unknown'
+                }
+            };
+
+            res.json({
+                error: false,
+                message: 'Admin status retrieved',
+                data: status
+            });
+
+        } catch (error) {
+            console.error('Get admin status error:', error);
+            res.status(500).json({
+                error: true,
+                message: 'Failed to get admin status'
+            });
+        }
+    }
+
+    /**
+     * Reinitialize database endpoint
+     * @private
+     */
+    async _reinitializeDatabase(req, res) {
+        try {
+            console.log('🔄 Reinitializing databases...');
+
+            // Initialize databases
+            await this._initializeDatabases();
+
+            // Initialize security
+            await this._initializeSecurity();
+
+            res.json({
+                error: false,
+                message: 'Database and security reinitialized successfully',
+                timestamp: new Date().toISOString()
+            });
+
+        } catch (error) {
+            console.error('Reinitialize database error:', error);
+            res.status(500).json({
+                error: true,
+                message: 'Failed to reinitialize database and security'
+            });
         }
     }
 
@@ -183,58 +282,42 @@ class NeuronCore {
      */
     async start() {
         try {
-            if (!this.initialized) {
-                await this.initialize();
-            }
+            // Display startup banner
+            StartupBanner.display();
+            StartupBanner.displaySystemInfo();
 
-            this.server = this.app.listen(this.port, () => {
-                console.log(`🌟 NeuronCore server running on port ${this.port}`);
-                console.log(`📊 Health check: http://localhost:${this.port}/health`);
-                console.log(`🔐 Security API: http://localhost:${this.port}/api/security`);
-                console.log(`🔧 Support API: http://localhost:${this.port}/api/support`);
+            await this.initialize();
+
+            this.app.listen(this.port, () => {
+                const { getInstance } = require('./src/data/manager/keys_vo_manager');
+                const keysManager = getInstance();
+                const keysVO = keysManager.getKeysVO();
+
+                StartupBanner.displayConfigStatus(keysVO);
+                StartupBanner.displayWarnings();
+                StartupBanner.displaySuccess(this.port);
             });
-
-            // Handle graceful shutdown
-            process.on('SIGTERM', () => this.shutdown());
-            process.on('SIGINT', () => this.shutdown());
 
         } catch (error) {
-            console.error('❌ Failed to start NeuronCore:', error);
+            StartupBanner.displayError(error);
             process.exit(1);
-        }
-    }
-
-    /**
-     * Shutdown the server gracefully
-     */
-    async shutdown() {
-        console.log('\n🛑 Shutting down NeuronCore...');
-
-        if (this.server) {
-            this.server.close(() => {
-                console.log('✅ Server closed');
-                process.exit(0);
-            });
-
-            // Force close after 10 seconds
-            setTimeout(() => {
-                console.log('⚠ Forcing server shutdown...');
-                process.exit(1);
-            }, 10000);
-        } else {
-            process.exit(0);
         }
     }
 }
 
 // Create and start the application
-const neuronCore = new NeuronCore();
+const app = new NeuronCore();
+app.start();
 
-// Start server
-neuronCore.start().catch(error => {
-    console.error('Failed to start NeuronCore:', error);
-    process.exit(1);
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+    StartupBanner.displayShutdown();
+    process.exit(0);
 });
 
-// Export for testing
-module.exports = neuronCore;
+process.on('SIGINT', () => {
+    StartupBanner.displayShutdown();
+    process.exit(0);
+});
+
+module.exports = NeuronCore;

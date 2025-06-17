@@ -1,25 +1,12 @@
-# NeuronCore - Sistema de IA Multi-Instância
+# NeuronCore
 
-O NeuronCore é um backend robusto para sistemas de inteligência artificial que oferece gerenciamento multi-instância, autenticação avançada, timeline de interações e suporte completo a workflows.
+🧠 **Multi-AI orchestration platform with workflow capabilities and comprehensive security module**
 
-## 🚀 Principais Características
+NeuronCore é o backend central para sistemas de inteligência artificial que funciona como camada de gerenciamento entre clientes e modelos de IA. O sistema utiliza o NeuronDB para armazenamento de dados e oferece funcionalidades avançadas de segurança, autenticação e workflows.
 
-- **Multi-IA**: Suporte a múltiplas instâncias de IA simultaneamente
-- **Segurança Avançada**: Autenticação JWT, grupos de usuários e permissões granulares
-- **Timeline**: Histórico completo de interações com sistema de tags
-- **Workflows**: Sistema de comandos personalizáveis e agendamento
-- **Configuração Flexível**: Temas personalizáveis e comportamentos configuráveis
-- **SNL Integration**: Integração nativa com NeuronDB usando linguagem SNL
+## 🚀 Quick Start
 
-## 📋 Pré-requisitos
-
-- Node.js 18+ 
-- NeuronDB Server rodando e acessível
-- NPM ou Yarn
-
-## 🛠️ Instalação
-
-### 1. Clone o repositório
+### 1. Clone o projeto
 ```bash
 git clone <repository-url>
 cd neuron-core
@@ -35,27 +22,29 @@ npm install
 # Copie o arquivo de exemplo
 cp config.json.example config.json
 
-# Edite config.json com suas configurações
+# Edite o config.json com suas configurações
 nano config.json
 ```
 
-### 4. Configuração do config.json
+### 4. Configure o config.json
+
+**⚠️ IMPORTANTE: Substitua os tokens de exemplo pelos reais do seu NeuronDB**
 
 ```json
 {
   "database": {
     "config_url": "http://localhost:8080",
-    "config_token": "seu_token_de_config_aqui"
+    "config_token": "YOUR_REAL_CONFIG_TOKEN_HERE"
   },
   "ai_instances": {
-    "minha_ia": {
-      "name": "minha_ia",
-      "url": "http://localhost:8080", 
-      "token": "token_da_minha_ia_aqui"
+    "demo_ai": {
+      "name": "demo_ai",
+      "url": "http://localhost:8080",
+      "token": "YOUR_REAL_AI_TOKEN_HERE"
     }
   },
   "security": {
-    "jwt_secret": "seu_jwt_secret_super_seguro_aqui",
+    "jwt_secret": "your_super_secret_jwt_key_change_in_production",
     "token_expiry": "24h"
   },
   "server": {
@@ -70,11 +59,11 @@ nano config.json
 npm start
 ```
 
-O servidor será iniciado na porta 3000 (ou a porta configurada) e automaticamente:
-- Criará os bancos de dados necessários
-- Inicializará as estruturas de dados
-- Criará o usuário administrativo de subscription
-- Configurará grupos e permissões padrão
+O servidor será iniciado na porta 3000 e automaticamente:
+- ✅ Criará os bancos de dados necessários
+- ✅ Inicializará as estruturas de dados
+- ✅ Criará o usuário administrativo de subscription
+- ✅ Configurará grupos e permissões padrão
 
 ## 🔧 Estrutura do Projeto
 
@@ -83,8 +72,8 @@ neuron-core/
 ├── src/
 │   ├── api/                    # Camada de API
 │   │   ├── security/           # Endpoints de segurança
-│   │   └── support/            # Endpoints de suporte
-│   ├── core/                   # Lógica de negócio principal (futuro)
+│   │   └── support/            # Endpoints de suporte (TODO)
+│   ├── core/                   # Lógica de negócio principal (TODO)
 │   ├── cross/                  # Entidades compartilhadas
 │   │   └── entity/             # Entidades de domínio
 │   ├── data/                   # Camada de dados
@@ -92,8 +81,9 @@ neuron-core/
 │   │   ├── snl/               # Comandos SNL
 │   │   ├── neuron_db/         # Senders para NeuronDB
 │   │   └── initializer/       # Inicializadores de banco
-│   └── support/               # Módulo de suporte (futuro)
+├── postman/                   # Coleções Postman para testes
 ├── config.json               # Configuração do sistema
+├── config.json.example       # Exemplo de configuração
 ├── package.json              # Dependências NPM
 └── README.md                 # Este arquivo
 ```
@@ -106,7 +96,7 @@ neuron-core/
 - **admin**: Administradores que podem gerenciar usuários e configurações
 - **default**: Usuários padrão da IA
 
-### Usuário Padrão
+### Usuário Padrão do Sistema
 
 - **Email**: `subscription_admin@system.local`
 - **Senha**: `sudo_subscription_admin`
@@ -116,18 +106,18 @@ neuron-core/
 
 ```bash
 # Login
-POST /{ai_name}/security/login
+POST /api/security/{ai_name}/auth/login
 {
   "username": "user@example.com",
   "password": "password123"
 }
 
 # Validar token
-GET /{ai_name}/security/validate
+GET /api/security/{ai_name}/auth/validate
 Authorization: Bearer {token}
 
 # Trocar senha
-POST /{ai_name}/security/change-password
+POST /api/security/{ai_name}/auth/change-password
 Authorization: Bearer {token}
 {
   "newPassword": "newpassword123"
@@ -138,7 +128,7 @@ Authorization: Bearer {token}
 
 ```bash
 # Criar usuário (Admin)
-POST /{ai_name}/security/create-user
+POST /api/security/{ai_name}/users/create
 Authorization: Bearer {admin_token}
 {
   "email": "newuser@example.com",
@@ -146,18 +136,9 @@ Authorization: Bearer {admin_token}
   "nick": "New User"
 }
 
-# Obter permissões
-GET /{ai_name}/security/permissions
+# Obter informações do usuário atual
+GET /api/security/{ai_name}/auth/me
 Authorization: Bearer {token}
-
-# Definir permissão (Admin)
-POST /{ai_name}/security/permissions/set
-Authorization: Bearer {admin_token}
-{
-  "email": "user@example.com",
-  "database": "timeline",
-  "level": 2
-}
 ```
 
 **Níveis de Permissão:**
@@ -165,80 +146,16 @@ Authorization: Bearer {admin_token}
 - `2` - Write (escrita)
 - `3` - Admin (administrador)
 
-## 📚 Módulo de Support
+## 📚 Módulo de Support (TODO)
 
-### Timeline
+O módulo de support está em desenvolvimento. Funcionalidades planejadas:
 
-O sistema de timeline registra todas as interações e permite busca avançada:
-
-```bash
-# Registrar entrada na timeline
-POST /{ai_name}/support/timeline/record
-Authorization: Bearer {token}
-{
-  "entity_name": "chat",
-  "input": "Hello, world!",
-  "output": "Hi there!",
-  "tags": ["test", "greeting"]
-}
-
-# Buscar por período
-GET /{ai_name}/support/timeline?year=2025&month=6&entity=chat
-Authorization: Bearer {token}
-
-# Buscar por termo
-GET /{ai_name}/support/timeline/search?query=hello
-Authorization: Bearer {token}
-```
-
-### Configuração de IA
-
-```bash
-# Obter configuração
-GET /{ai_name}/support/config
-Authorization: Bearer {token}
-
-# Atualizar tema (Admin apenas)
-PUT /{ai_name}/support/config/theme
-Authorization: Bearer {admin_token}
-{
-  "primary_colors": {
-    "black": "#000000",
-    "white": "#FFFFFF",
-    "dark_blue": "#0363AE",
-    "dark_purple": "#50038F"
-  }
-}
-```
-
-### Sistema de Tags
-
-```bash
-# Adicionar tag
-POST /{ai_name}/support/tag
-Authorization: Bearer {token}
-{
-  "database": "timeline",
-  "namespace": "user_namespace",
-  "entity": "chat_entry",
-  "tag": "important"
-}
-
-# Listar tags
-GET /{ai_name}/support/tags?database=timeline&namespace=user_namespace
-Authorization: Bearer {token}
-```
-
-### Operações SNL Diretas
-
-```bash
-# Executar comando SNL
-POST /{ai_name}/support/snl
-Authorization: Bearer {token}
-{
-  "command": "list(database)\non()"
-}
-```
+- **Timeline**: Registro e busca de interações
+- **Command System**: Sistema de criação e execução de comandos
+- **Configuration**: Gerenciamento de cores e configurações da IA
+- **Tag System**: Sistema de tags para entidades
+- **Database Operations**: Operações de banco e namespace
+- **SNL Execution**: Execução direta de comandos SNL
 
 ## 🎨 Esquema de Cores Padrão
 
@@ -261,83 +178,69 @@ Authorization: Bearer {token}
 ## 📊 Endpoints de Administração
 
 ```bash
-# Status dos bancos de dados
-GET /admin/database/status
-
-# Forçar inicialização
-POST /admin/database/initialize
-
-# Status de saúde
+# Status geral do sistema
 GET /health
+
+# Status administrativo
+GET /admin/status
+
+# Forçar inicialização de bancos
+POST /admin/database/initialize
 ```
 
-## 🧪 Testes com Postman
+## 🧪 Testando com Postman
 
-Importe a coleção Postman incluída no projeto para testar todos os endpoints. A coleção inclui:
+1. Importe a coleção: `postman/NeuronCore-Security.postman_collection.json`
+2. Configure as variáveis:
+   - `base_url`: `http://localhost:3000`
+   - `ai_name`: `demo_ai` (ou o nome da sua IA)
+3. Execute os testes na seguinte ordem:
+   - **Health & Info** → **Authentication** → **User Management**
 
-- Todas as operações de segurança
-- Operações de timeline
-- Gerenciamento de configuração
-- Operações de banco de dados
-- Sistema de tags
-- Execução de SNL
+### Sequência de Teste Recomendada:
 
-### Variáveis da Coleção
-- `base_url`: http://localhost:3000
-- `ai_name`: nome da sua instância de IA
-- `auth_token`: token do usuário (preenchido automaticamente)
-- `admin_token`: token do admin (preenchido automaticamente)
-
-## 🔧 Desenvolvimento
-
-### Estrutura de Código
-
-- **Entidades**: Modelos de domínio em `src/cross/entity/`
-- **Managers**: Lógica de negócio em `src/data/manager/`
-- **SNL**: Comandos de banco em `src/data/snl/`
-- **Controllers**: Endpoints em `src/api/`
-
-### Padrões Utilizados
-
-- **Repository Pattern**: Para acesso a dados
-- **Singleton Pattern**: Para gerenciamento de chaves (KeysVO)
-- **DTO Pattern**: Para transferência de dados entre camadas
-- **Command Pattern**: Para operações SNL
+1. 🔍 **Health Check** - Verificar se o sistema está rodando
+2. 🔐 **Login Subscription Admin** - Fazer login como admin do sistema
+3. 👤 **Create User** - Criar um usuário de teste
+4. 🔑 **Login Custom User** - Fazer login com o usuário criado
+5. ✅ **Validate Token** - Validar o token obtido
 
 ## 🐛 Troubleshooting
 
-### Erro: "Cannot find module '../snl/subscription_snl'"
-- Certifique-se de que todos os arquivos SNL foram criados
-- Verifique se os caminhos estão corretos
+### Erro: "Configuration validation failed"
+- ✅ Verifique se o arquivo `config.json` existe e está configurado corretamente
+- ✅ Confirme se os tokens do NeuronDB estão corretos e válidos
 
-### Erro: "Config token not available"
-- Verifique se o arquivo `config.json` está configurado corretamente
-- Confirme se os tokens do NeuronDB estão válidos
+### Erro: "Cannot find module 'cors'"
+- ✅ Execute `npm install` para instalar todas as dependências
 
 ### Erro de conexão com NeuronDB
-- Verifique se o NeuronDB está rodando
-- Confirme as URLs e tokens no config.json
-- Teste a conectividade manualmente
+- ✅ Verifique se o NeuronDB está rodando na URL configurada
+- ✅ Confirme se as URLs e tokens estão corretos no config.json
+- ✅ Teste a conectividade manualmente
 
 ### Problemas de inicialização
-- Use o endpoint `/admin/database/initialize` para forçar reinicialização
-- Verifique logs detalhados no console
-- Confirme permissões dos tokens
+- ✅ Use o endpoint `/admin/database/initialize` para forçar reinicialização
+- ✅ Verifique logs detalhados no console
+- ✅ Confirme permissões dos tokens
 
 ## 📈 Monitoramento
 
 O sistema fornece endpoints de monitoramento:
 
 - `/health`: Status geral do sistema
-- `/admin/database/status`: Status detalhado dos bancos
+- `/admin/status`: Status detalhado da aplicação
+- `/api/security/health`: Status do módulo de segurança
+- `/api/support/health`: Status do módulo de suporte
 
 ## 🔒 Segurança
 
-- Tokens JWT com expiração configurável
-- Permissões granulares por banco de dados
-- Isolamento completo entre instâncias de IA
-- Grupos de usuários com controle de acesso
-- Validação de entrada em todos os endpoints
+- ✅ Tokens JWT com expiração configurável
+- ✅ Permissões granulares por banco de dados
+- ✅ Isolamento completo entre instâncias de IA
+- ✅ Grupos de usuários com controle de acesso
+- ✅ Validação de entrada em todos os endpoints
+- ✅ Sistema de grupos hierárquico
 
 ## 🚀 Produção
 
@@ -349,19 +252,43 @@ Para deploy em produção:
 4. Use HTTPS
 5. Configure logs apropriados
 6. Monitore performance e uso
+7. **Troque TODOS os tokens de exemplo por tokens reais!**
 
-## 📝 License
+## 🤝 Desenvolvimento
+
+### Arquitetura
+
+- **Repository Pattern**: Para acesso a dados
+- **Singleton Pattern**: Para gerenciamento de chaves (KeysVO)
+- **DTO Pattern**: Para transferência de dados entre camadas
+- **Command Pattern**: Para operações SNL
+
+### Adicionando Novas Funcionalidades
+
+1. **Entidades**: Modelos de domínio em `src/cross/entity/`
+2. **Managers**: Lógica de negócio em `src/data/manager/`
+3. **SNL**: Comandos de banco em `src/data/snl/`
+4. **Controllers**: Endpoints em `src/api/`
+
+## 📝 Roadmap
+
+- ✅ Módulo Security completo
+- ✅ Sistema de autenticação JWT
+- ✅ Gerenciamento de usuários e grupos
+- ✅ Inicialização automática de bancos
+- 🔄 Módulo Support (em desenvolvimento)
+- 🔄 Módulo Core com workflows
+- 🔄 Sistema de comandos avançado
+- 🔄 Timeline e histórico
+- 🔄 Sistema de tags
+- 🔄 Configurações dinâmicas
+
+## 📄 License
 
 Este projeto está sob a licença MIT. Veja o arquivo LICENSE para detalhes.
-
-## 🤝 Contribuição
-
-1. Fork o projeto
-2. Crie uma branch para sua feature
-3. Commit suas mudanças
-4. Push para a branch
-5. Abra um Pull Request
 
 ---
 
 **NeuronCore** - Elevando a inteligência artificial a um novo patamar 🧠✨
+
+*Desenvolvido com ❤️ para simplificar e potencializar o uso de múltiplas IAs*

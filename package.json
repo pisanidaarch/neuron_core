@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "setup": "node quick-start.js",
+    "setup:full": "chmod +x setup.sh && ./setup.sh",
+    "quick-start": "node quick-start.js",
     "test": "jest",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration",
@@ -15,9 +18,13 @@
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint src/**/*.js --fix",
     "docs": "jsdoc src/**/*.js -d docs",
-    "db:init": "node -e \"require('./src/data/initializer/database_initializer').initializeAll()\"",
-    "db:status": "node -e \"console.log('Use: curl http://localhost:3000/admin/database/status')\"",
-    "security:test": "newman run postman/NeuronCore-Security.postman_collection.json"
+    "db:init": "node -e \"const init = require('./src/data/initializer/database_initializer'); new init().initializeAll()\"",
+    "db:status": "curl http://localhost:3000/admin/status",
+    "security:test": "newman run postman/NeuronCore-Security.postman_collection.json",
+    "health": "curl http://localhost:3000/health",
+    "admin": "curl http://localhost:3000/admin/status",
+    "clean": "rm -rf node_modules coverage docs logs temp && npm install",
+    "reset": "rm -f config.json && cp config.json.example config.json"
   },
   "keywords": [
     "ai",
@@ -31,7 +38,9 @@
     "subscription",
     "users",
     "groups",
-    "permissions"
+    "permissions",
+    "snl",
+    "timeline"
   ],
   "author": "NeuronCore Team",
   "license": "ISC",
@@ -83,5 +92,8 @@
   "bugs": {
     "url": "https://github.com/your-org/neuron-core/issues"
   },
-  "homepage": "https://github.com/your-org/neuron-core#readme"
+  "homepage": "https://github.com/your-org/neuron-core#readme",
+  "bin": {
+    "neuron-setup": "./quick-start.js"
+  }
 }

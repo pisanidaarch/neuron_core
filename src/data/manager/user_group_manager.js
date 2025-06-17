@@ -1,214 +1,377 @@
 // src/data/manager/user_group_manager.js
 
-const UserGroup = require('../../cross/entity/user_group');
 const UserGroupSNL = require('../snl/user_group_snl');
-const AISender = require('../neuron_db/ai_sender');
-const { ValidationError, NotFoundError } = require('../../cross/entity/errors');
+const { NeuronDBError, ValidationError } = require('../../cross/entity/errors');
 
 /**
- * UserGroupManager - Manages UserGroup entity operations
+ * User Group Manager - Manages user groups and permissions
  */
 class UserGroupManager {
-    constructor(aiToken) {
-        this.aiToken = aiToken;
-        this.snl = new UserGroupSNL();
-        this.sender = new AISender();
+    constructor() {
+        this.groupSNL = new UserGroupSNL();
+        this.sender = null; // Will be injected
     }
 
     /**
-     * Initialize user groups structure if needed
+     * Initialize with AI-specific sender
+     * @param {Object} aiSender - AI sender instance
+     */
+    initialize(aiSender) {
+        this.sender = aiSender;
+    }
+
+    /**
+     * Initialize default system groups
      * @returns {Promise<void>}
      */
-    async initialize() {
+    async initializeDefaultGroups() {
         try {
-            const checkCommand = this.snl.checkGroupsStructureExistsSNL();
-            const checkResponse = await this.sender.executeSNL(checkCommand, this.aiToken);
+            console.log('   🔒 Initializing default groups...');
 
-            const exists = this.snl.parseStructureExistsResponse(checkResponse);
-            if (!exists) {
-                const createCommand = this.snl.createGroupsStructureSNL();
-                await this.sender.executeSNL(createCommand, this.aiToken);
-                console.log('✅ User groups structure created');
-            }
-        } catch (error) {
-            console.error('Failed to initialize user groups structure:', error);
-            throw error;
-        }
-    }
+            const defaultGroups = this.groupSNL.getDefaultSystemGroups();
 
-    /**
-     * Create or update user group
-     * @param {UserGroup} group - UserGroup entity
-     * @returns {Promise<UserGroup>}
-     */
-    async saveGroup(group) {
-        try {
-            const validation = group.validate();
-            if (!validation.valid) {
-                throw new ValidationError(`Group validation failed: ${validation.errors.join(', ')}`);
-            }
+            for (const groupData of defaultGroups) {
+                try {
+                    // Check if group already exists
+                    const existingGroup = await this.getGroup(groupData.name);
 
-            group.updatedAt = new Date().toISOString();
-            const groupData = this.snl.buildGroupData(group);
-            const command = this.snl.setGroupSNL(group.name, groupData);
-            await this.sender.executeSNL(command, this.aiToken);
-
-            console.log(`✅ Group saved: ${group.name}`);
-            return group;
-        } catch (error) {
-            console.error('Failed to save group:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Get user group by name
-     * @param {string} groupName - Group name
-     * @returns {Promise<UserGroup|null>}
-     */
-    async getGroup(groupName) {
-        try {
-            const command = this.snl.getGroupSNL(groupName);
-            const response = await this.sender.executeSNL(command, this.aiToken);
-
-            if (!response || Object.keys(response).length === 0) {
-                return null;
-            }
-
-            const groupData = this.snl.parseGroupData(response);
-            return UserGroup.fromObject(groupData);
-        } catch (error) {
-            console.error('Failed to get group:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * List all user groups (visible only unless admin)
-     * @param {boolean} includeHidden - Include hidden groups
-     * @returns {Promise<UserGroup[]>}
-     */
-    async listGroups(includeHidden = false) {
-        try {
-            const command = this.snl.listGroupsSNL();
-            const response = await this.sender.executeSNL(command, this.aiToken);
-
-            const groupNames = this.snl.parseGroupsList(response);
-            const groups = [];
-
-            for (const groupName of groupNames) {
-                const group = await this.getGroup(groupName);
-                if (group && (includeHidden || !group.isHidden)) {
-                    groups.push(group);
+                    if (!existingGroup) {
+                        await this.createGroup(groupData);
+                        console.log(`     ✅ Created group: ${groupData.name}`);
+                    } else {
+                        console.log(`     ✓ Group already exists: ${groupData.name}`);
+                    }
+                } catch (error) {
+                    console.error(`     ❌ Failed to create group ${groupData.name}:`, error.message);
                 }
             }
 
-            return groups;
+            console.log('   ✅ Default groups initialized');
+
         } catch (error) {
-            console.error('Failed to list groups:', error);
+            console.error('Failed to initialize default groups:', error);
             throw error;
         }
     }
 
     /**
-     * Get visible groups only (for non-admin users)
-     * @returns {Promise<UserGroup[]>}
+     * Create new group
+     * @param {Object} groupData - Group data
+     * @returns {Promise<Object>} Created group
      */
-    async getVisibleGroups() {
-        return this.listGroups(false);
-    }
-
-    /**
-     * Delete user group
-     * @param {string} groupName - Group name
-     * @returns {Promise<boolean>}
-     */
-    async deleteGroup(groupName) {
+    async createGroup(groupData) {
         try {
-            // Check if group exists first
-            const existingGroup = await this.getGroup(groupName);
-            if (!existingGroup) {
-                throw new NotFoundError(`Group not found: ${groupName}`);
+            // Validate group data
+            const validationErrors = this.groupSNL.validateGroupData(groupData);
+            if (validationErrors.length > 0) {
+                throw new ValidationError(`Group validation failed: ${validationErrors.join(', ')}`);
             }
 
-            // Prevent deletion of system groups
-            if (existingGroup.isSystem) {
-                throw new ValidationError(`Cannot delete system group: ${groupName}`);
+            // Check if group already exists
+            const existingGroup = await this.getGroup(groupData.name);
+            if (existingGroup) {
+                throw new ValidationError(`Group '${groupData.name}' already exists`);
             }
 
-            const command = this.snl.removeGroupSNL(groupName);
-            await this.sender.executeSNL(command, this.aiToken);
+            // Create group
+            const createGroupSNL = this.groupSNL.generateCreateGroupSNL(groupData);
+            await this.sender.executeSNL(createGroupSNL);
 
-            console.log(`✅ Group deleted: ${groupName}`);
-            return true;
+            return {
+                success: true,
+                group: {
+                    name: groupData.name,
+                    description: groupData.description,
+                    permissions: groupData.permissions || [],
+                    isHidden: groupData.isHidden || false,
+                    isSystem: groupData.isSystem || false,
+                    created_at: new Date().toISOString()
+                }
+            };
+
         } catch (error) {
-            console.error('Failed to delete group:', error);
-            throw error;
+            console.error('Create group error:', error);
+
+            if (error instanceof ValidationError) {
+                throw error;
+            }
+
+            throw new NeuronDBError(`Group creation failed: ${error.message}`);
         }
     }
 
     /**
-     * Create default system groups for AI
-     * @param {string} aiName - AI name
-     * @returns {Promise<void>}
-     */
-    async createDefaultGroups(aiName) {
-        try {
-            console.log(`Creating default groups for AI: ${aiName}`);
-
-            // Create subscription_admin group
-            const subscriptionAdminGroup = UserGroup.createSubscriptionAdminGroup(aiName);
-            await this.saveGroup(subscriptionAdminGroup);
-
-            // Create admin group
-            const adminGroup = UserGroup.createAdminGroup(aiName);
-            await this.saveGroup(adminGroup);
-
-            // Create default group
-            const defaultGroup = UserGroup.createDefaultGroup(aiName);
-            await this.saveGroup(defaultGroup);
-
-            console.log(`✅ Default groups created for AI: ${aiName}`);
-        } catch (error) {
-            console.error(`Failed to create default groups for AI ${aiName}:`, error);
-            throw error;
-        }
-    }
-
-    /**
-     * Check if group exists
+     * Get group by name
      * @param {string} groupName - Group name
-     * @returns {Promise<boolean>}
+     * @returns {Promise<Object|null>} Group data or null if not found
      */
-    async groupExists(groupName) {
+    async getGroup(groupName) {
         try {
-            const group = await this.getGroup(groupName);
-            return group !== null;
+            const getGroupSNL = this.groupSNL.generateGetGroupSNL(groupName);
+            const response = await this.sender.executeSNL(getGroupSNL);
+
+            return this.groupSNL.parseGroupData(response);
+
         } catch (error) {
-            return false;
+            // Group not found is not an error
+            if (error.message && error.message.includes('not found')) {
+                return null;
+            }
+
+            console.error('Get group error:', error);
+            throw new NeuronDBError(`Failed to get group: ${error.message}`);
+        }
+    }
+
+    /**
+     * List all groups
+     * @param {boolean} includeHidden - Include hidden groups
+     * @returns {Promise<Array>} Array of groups
+     */
+    async listGroups(includeHidden = false) {
+        try {
+            const listGroupsSNL = this.groupSNL.generateListGroupsSNL(includeHidden);
+            const response = await this.sender.executeSNL(listGroupsSNL);
+
+            return this.groupSNL.parseGroupsList(response);
+
+        } catch (error) {
+            console.error('List groups error:', error);
+            throw new NeuronDBError(`Failed to list groups: ${error.message}`);
+        }
+    }
+
+    /**
+     * Add member to group
+     * @param {string} groupName - Group name
+     * @param {string} userEmail - User email
+     * @returns {Promise<Object>} Success result
+     */
+    async addMemberToGroup(groupName, userEmail) {
+        try {
+            // Get current group data
+            const groupData = await this.getGroup(groupName);
+
+            if (!groupData) {
+                throw new ValidationError(`Group '${groupName}' not found`);
+            }
+
+            // Check if user is already a member
+            if (groupData.members && groupData.members.includes(userEmail)) {
+                return {
+                    success: true,
+                    message: `User is already a member of group '${groupName}'`
+                };
+            }
+
+            // Add user to members array
+            const updatedMembers = [...(groupData.members || []), userEmail];
+
+            const updateSNL = this.groupSNL.generateUpdateGroupMembersSNL(groupName, updatedMembers);
+            await this.sender.executeSNL(updateSNL);
+
+            return {
+                success: true,
+                message: `User '${userEmail}' added to group '${groupName}'`
+            };
+
+        } catch (error) {
+            console.error('Add member to group error:', error);
+
+            if (error instanceof ValidationError) {
+                throw error;
+            }
+
+            throw new NeuronDBError(`Failed to add member to group: ${error.message}`);
+        }
+    }
+
+    /**
+     * Remove member from group
+     * @param {string} groupName - Group name
+     * @param {string} userEmail - User email
+     * @returns {Promise<Object>} Success result
+     */
+    async removeMemberFromGroup(groupName, userEmail) {
+        try {
+            // Get current group data
+            const groupData = await this.getGroup(groupName);
+
+            if (!groupData) {
+                throw new ValidationError(`Group '${groupName}' not found`);
+            }
+
+            // Check if user is a member
+            if (!groupData.members || !groupData.members.includes(userEmail)) {
+                return {
+                    success: true,
+                    message: `User is not a member of group '${groupName}'`
+                };
+            }
+
+            // Remove user from members array
+            const updatedMembers = groupData.members.filter(email => email !== userEmail);
+
+            const updateSNL = this.groupSNL.generateUpdateGroupMembersSNL(groupName, updatedMembers);
+            await this.sender.executeSNL(updateSNL);
+
+            return {
+                success: true,
+                message: `User '${userEmail}' removed from group '${groupName}'`
+            };
+
+        } catch (error) {
+            console.error('Remove member from group error:', error);
+
+            if (error instanceof ValidationError) {
+                throw error;
+            }
+
+            throw new NeuronDBError(`Failed to remove member from group: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get user groups
+     * @param {string} userEmail - User email
+     * @returns {Promise<Array>} Array of groups the user belongs to
+     */
+    async getUserGroups(userEmail) {
+        try {
+            const getUserGroupsSNL = this.groupSNL.generateGetUserGroupsSNL(userEmail);
+            const response = await this.sender.executeSNL(getUserGroupsSNL);
+
+            return this.groupSNL.parseGroupsList(response);
+
+        } catch (error) {
+            console.error('Get user groups error:', error);
+            throw new NeuronDBError(`Failed to get user groups: ${error.message}`);
         }
     }
 
     /**
      * Update group permissions
      * @param {string} groupName - Group name
-     * @param {string[]} permissions - New permissions array
-     * @returns {Promise<UserGroup>}
+     * @param {Array} permissions - New permissions array
+     * @returns {Promise<Object>} Success result
      */
     async updateGroupPermissions(groupName, permissions) {
         try {
-            const group = await this.getGroup(groupName);
-            if (!group) {
-                throw new NotFoundError(`Group not found: ${groupName}`);
+            // Get current group data
+            const groupData = await this.getGroup(groupName);
+
+            if (!groupData) {
+                throw new ValidationError(`Group '${groupName}' not found`);
             }
 
-            group.permissions = permissions;
-            group.updatedAt = new Date().toISOString();
+            // Update with new permissions
+            const updateData = {
+                ...groupData,
+                permissions: permissions,
+                updated_at: new Date().toISOString()
+            };
 
-            return await this.saveGroup(group);
+            const updateSNL = this.groupSNL.generateCreateGroupSNL(updateData); // Reuse create for update
+            await this.sender.executeSNL(updateSNL);
+
+            return {
+                success: true,
+                message: `Permissions updated for group '${groupName}'`
+            };
+
         } catch (error) {
-            console.error('Failed to update group permissions:', error);
-            throw error;
+            console.error('Update group permissions error:', error);
+
+            if (error instanceof ValidationError) {
+                throw error;
+            }
+
+            throw new NeuronDBError(`Failed to update group permissions: ${error.message}`);
+        }
+    }
+
+    /**
+     * Delete group
+     * @param {string} groupName - Group name
+     * @returns {Promise<Object>} Success result
+     */
+    async deleteGroup(groupName) {
+        try {
+            // Get group data first to check if it's a system group
+            const groupData = await this.getGroup(groupName);
+
+            if (!groupData) {
+                throw new ValidationError(`Group '${groupName}' not found`);
+            }
+
+            if (groupData.isSystem) {
+                throw new ValidationError(`Cannot delete system group '${groupName}'`);
+            }
+
+            const deleteGroupSNL = this.groupSNL.generateDeleteGroupSNL(groupName);
+            await this.sender.executeSNL(deleteGroupSNL);
+
+            return {
+                success: true,
+                message: `Group '${groupName}' deleted successfully`
+            };
+
+        } catch (error) {
+            console.error('Delete group error:', error);
+
+            if (error instanceof ValidationError) {
+                throw error;
+            }
+
+            throw new NeuronDBError(`Failed to delete group: ${error.message}`);
+        }
+    }
+
+    /**
+     * Check if user has specific permission
+     * @param {string} userEmail - User email
+     * @param {string} permission - Permission to check
+     * @returns {Promise<boolean>} True if user has permission
+     */
+    async userHasPermission(userEmail, permission) {
+        try {
+            const userGroups = await this.getUserGroups(userEmail);
+
+            for (const group of userGroups) {
+                if (group.permissions && group.permissions.includes(permission)) {
+                    return true;
+                }
+            }
+
+            return false;
+
+        } catch (error) {
+            console.error('Check user permission error:', error);
+            return false; // Default to no permission on error
+        }
+    }
+
+    /**
+     * Get all permissions for a user
+     * @param {string} userEmail - User email
+     * @returns {Promise<Array>} Array of permissions
+     */
+    async getUserPermissions(userEmail) {
+        try {
+            const userGroups = await this.getUserGroups(userEmail);
+            const permissions = new Set();
+
+            for (const group of userGroups) {
+                if (group.permissions) {
+                    group.permissions.forEach(permission => permissions.add(permission));
+                }
+            }
+
+            return Array.from(permissions);
+
+        } catch (error) {
+            console.error('Get user permissions error:', error);
+            return []; // Default to no permissions on error
         }
     }
 }

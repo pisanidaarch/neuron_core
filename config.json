@@ -1,7 +1,7 @@
 {
   "neurondb": {
     "url": "https://ndb.archoffice.tech",
-    "config_jwt": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyZWFkZXIiLCJleHAiOjQ5MDExMTM2NzksInBlcm1pc3Npb25zIjp7ImNvbmZpZyI6MSwibWFpbiI6MSwiZ2xvYmFsIjoxfSwibGV2ZWwiOjEsImluc3RhbmNlIjoiYWFpLWNvbmZpZyJ9.oWmnh2bfS0iLQOaHUOcqJxgctPWg6_jDu0RsV48v4Ys"
+    "config_jwt": "...."
   },
   "server": {
     "port": 3000

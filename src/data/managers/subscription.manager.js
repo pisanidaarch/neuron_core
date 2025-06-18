@@ -1,6 +1,6 @@
 // src/data/managers/subscription.manager.js
 const neuronDBSender = require('../sender/neurondb.sender');
-const snlCommands = require('../snl/commands');
+const snl = require('../snl'); // Corrigido: era '../snl/commands'
 const SubscriptionDTO = require('../../cross/entities/subscription.dto');
 const userManager = require('./user.manager');
 const planManager = require('./plan.manager');

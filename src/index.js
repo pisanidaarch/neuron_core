@@ -1,24 +1,20 @@
 // src/index.js
-require('dotenv').config();
 const Server = require('./api/server');
 const ConfigVO = require('./cross/entities/config.vo');
-const AIKeysVO = require('./cross/entities/ai-keys.vo');
 const neuronDBSender = require('./data/sender/neurondb.sender');
 const snl = require('./data/snl');
-const { CACHE_KEYS, ENTITY_TYPES } = require('./cross/constants');
+const { ENTITY_TYPES } = require('./cross/constants');
 
 class NeuronCore {
   constructor() {
     this.server = new Server();
     this.refreshInterval = null;
+    this.config = new ConfigVO();
   }
 
   async start() {
     try {
-      console.log('Starting Neuron-Core...');
-
-      // Validate environment
-      this.validateEnvironment();
+      console.log('🚀 Starting Neuron-Core...');
 
       // Initialize system
       await this.initializeSystem();
@@ -27,22 +23,14 @@ class NeuronCore {
       this.startRefreshCycle();
 
       // Start server
-      const port = process.env.PORT || 3000;
+      const port = ConfigVO.SERVER_PORT;
       await this.server.start(port);
 
-      console.log('Neuron-Core started successfully');
+      console.log(`✅ Neuron-Core started successfully on port ${port}`);
+      console.log(`📊 Configuration info:`, this.config.getConfigInfo());
     } catch (error) {
-      console.error('Failed to start Neuron-Core:', error);
+      console.error('❌ Failed to start Neuron-Core:', error);
       process.exit(1);
-    }
-  }
-
-  validateEnvironment() {
-    const required = ['NEURONDB_CONFIG_JWT'];
-    const missing = required.filter(key => !process.env[key]);
-
-    if (missing.length > 0) {
-      throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
     }
   }
 
@@ -52,7 +40,7 @@ class NeuronCore {
     // Load AI configurations
     await this.loadAIConfigurations();
 
-    // Initialize database security
+    // Initialize database security entities
     await this.initializeEntities();
 
     console.log('System initialization complete');
@@ -60,27 +48,51 @@ class NeuronCore {
 
   async loadAIConfigurations() {
     try {
-      console.log('Loading AI configurations...');
+      console.log('Loading AI configurations from NeuronDB...');
 
       const configToken = ConfigVO.CONFIG_JWT;
-      const snlCommand = snl.aiconfig.getAll();
-      const result = await neuronDBSender.executeSNL(snlCommand, configToken);
 
-      if (!result) {
+      // 1. Buscar IAs e suas keys
+      console.log('→ Loading AI keys...');
+      const aiKeysSnl = snl.aiconfig.getAll();
+      const aiKeysResult = await neuronDBSender.executeSNL(aiKeysSnl, configToken);
+
+      if (!aiKeysResult) {
         throw new Error('No AI configurations found');
       }
 
-      const aiKeys = new AIKeysVO(result);
-      ConfigVO.set(CACHE_KEYS.AI_KEYS, aiKeys);
+      // Set AI keys in ConfigVO singleton
+      this.config.setAIKeys(aiKeysResult);
+      console.log(`✓ Loaded ${this.config.getAllAIs().length} AI configurations:`, this.config.getAllAIs());
 
-      console.log(`Loaded ${aiKeys.getAllAIs().length} AI configurations`);
+      // 2. Buscar behaviors de cada IA
+      console.log('→ Loading AI behaviors...');
+      const aiList = this.config.getAllAIs();
+      for (const aiName of aiList) {
+        try {
+          const behaviorSnl = snl.behavior.getByAI(aiName);
+          const behaviorResult = await neuronDBSender.executeSNL(behaviorSnl, configToken);
+          this.config.setBehavior(aiName, behaviorResult);
+          console.log(`✓ Behavior loaded for ${aiName}`);
+        } catch (error) {
+          console.warn(`⚠ Failed to load behavior for ${aiName}:`, error.message);
+        }
+      }
+
+      // 3. Buscar configurações dos agentes
+      console.log('→ Loading agent configurations...');
+      const agentSnl = snl.agent.getAll();
+      const agentResult = await neuronDBSender.executeSNL(agentSnl, configToken);
+      this.config.setAgents(agentResult);
+      console.log(`✓ Loaded ${Object.keys(agentResult || {}).length} agent configurations`);
+
     } catch (error) {
       throw new Error(`Failed to load AI configurations: ${error.message}`);
     }
   }
 
   async initializeEntities() {
-    console.log('Checking and initializing database security...');
+    console.log('Checking and initializing database security entities...');
 
     const entities = [
       { name: 'usergroups', type: ENTITY_TYPES.STRUCTURE },
@@ -92,22 +104,21 @@ class NeuronCore {
       { name: 'billing', type: ENTITY_TYPES.STRUCTURE }
     ];
 
-    const aiKeys = ConfigVO.get(CACHE_KEYS.AI_KEYS);
-    const aiList = aiKeys.getAllAIs();
+    const aiList = this.config.getAllAIs();
 
     // Use the first AI's token for system operations
     if (aiList.length === 0) {
       throw new Error('No AI configurations available');
     }
 
-    const systemToken = aiKeys.getToken(aiList[0]);
+    const systemToken = this.config.getAIToken(aiList[0]);
 
     for (const entity of entities) {
       try {
         // Check if entity exists
         const checkSnl = snl.aiconfig.checkEntityExists('main', 'core', entity.name, entity.type);
         await neuronDBSender.executeSNL(checkSnl, systemToken);
-        console.log(`Entity ${entity.name} already exists`);
+        console.log(`✓ Entity ${entity.name} already exists`);
       } catch (error) {
         // Entity doesn't exist, create it
         console.log(`Creating entity ${entity.name}...`);
@@ -135,27 +146,14 @@ class NeuronCore {
           case 'billing':
             createSnl = snl.billing.create();
             break;
+          default:
+            throw new Error(`Unknown entity: ${entity.name}`);
         }
 
         await neuronDBSender.executeSNL(createSnl, systemToken);
-        console.log(`Entity ${entity.name} created successfully`);
+        console.log(`✓ Entity ${entity.name} created successfully`);
       }
     }
-  }
-
-  startRefreshCycle() {
-    // Refresh configurations every 5 minutes
-    const refreshInterval = 5 * 60 * 1000; // 5 minutes
-
-    this.refreshInterval = setInterval(async () => {
-      try {
-        console.log('Refreshing configurations...');
-        await this.loadAIConfigurations();
-        // In the future, also refresh agent configurations and behaviors
-      } catch (error) {
-        console.error('Failed to refresh configurations:', error);
-      }
-    }, refreshInterval);
   }
 
   async stop() {
@@ -170,7 +168,7 @@ class NeuronCore {
     await this.server.stop();
 
     // Clear cache
-    ConfigVO.flushAll();
+    this.config.flushAll();
 
     console.log('Neuron-Core stopped');
   }

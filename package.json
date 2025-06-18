@@ -7,31 +7,50 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "setup": "node setup.js",
+    "create-structure": "node create-structure.js",
+    "quick-fix": "node quick-fix.js",
+    "check-middlewares": "node check-middlewares.js",
+    "install-deps": "npm install express-validator",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:verbose": "jest --verbose",
     "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix"
+    "lint:fix": "eslint src/ --fix",
+    "validate": "node -e \"require('./src/cross/entities/config.vo'); console.log('✅ Configuration valid')\"",
+    "check-deps": "npm audit && npm outdated",
+    "clean": "rm -rf node_modules package-lock.json && npm install"
   },
   "keywords": [
     "ai",
+    "artificial-intelligence",
     "neurondb",
     "workflow",
     "multi-tenant",
     "intelligence",
-    "orchestration"
+    "orchestration",
+    "chatgpt",
+    "gemini",
+    "claude",
+    "grok",
+    "deepseek",
+    "api",
+    "nodejs",
+    "express"
   ],
-  "author": "ArchOffice",
+  "author": {
+    "name": "ArchOffice",
+    "email": "pisani@archoffice.tech"
+  },
   "license": "ISC",
   "dependencies": {
     "express": "^4.19.2",
-    "dotenv": "^16.4.5",
     "axios": "^1.7.2",
     "jsonwebtoken": "^9.0.2",
     "cors": "^2.8.5",
     "helmet": "^7.1.0",
     "express-rate-limit": "^7.2.0",
+    "express-validator": "^7.0.1",
     "morgan": "^1.10.0",
     "winston": "^3.13.0",
     "joi": "^17.13.1",
@@ -40,9 +59,12 @@
   "devDependencies": {
     "nodemon": "^3.1.0",
     "jest": "^29.7.0",
+    "supertest": "^6.3.4",
     "eslint": "^8.57.0",
     "eslint-config-airbnb-base": "^15.0.0",
-    "eslint-plugin-import": "^2.29.1"
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.2.5"
   },
   "engines": {
     "node": ">=18.0.0",
@@ -55,5 +77,32 @@
   "bugs": {
     "url": "https://github.com/archoffice/neuron-core/issues"
   },
-  "homepage": "https://github.com/archoffice/neuron-core#readme"
+  "homepage": "https://github.com/archoffice/neuron-core#readme",
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/index.js",
+      "!src/**/*.test.js"
+    ],
+    "coverageDirectory": "coverage",
+    "coverageReporters": ["text", "lcov", "html"]
+  },
+  "eslintConfig": {
+    "extends": ["airbnb-base", "prettier"],
+    "env": {
+      "node": true,
+      "jest": true
+    },
+    "rules": {
+      "no-console": "off",
+      "class-methods-use-this": "off"
+    }
+  },
+  "prettier": {
+    "singleQuote": true,
+    "trailingComma": "es5",
+    "tabWidth": 2,
+    "semi": true
+  }
 }

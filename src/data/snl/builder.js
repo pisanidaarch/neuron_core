@@ -29,13 +29,16 @@ class SNLBuilder {
     return this;
   }
 
-  setPath(database, namespace, entity) {
-    const parts = [];
-    if (database) parts.push(database);
-    if (namespace) parts.push(namespace);
-    if (entity) parts.push(entity);
+  setPath(...pathParts) {
+    // Remove empty, null or undefined parts
+    const validParts = pathParts.filter(part =>
+      part !== undefined &&
+      part !== null &&
+      part !== '' &&
+      part.toString().trim() !== ''
+    );
 
-    this.path = parts.join('.');
+    this.path = validParts.join('.');
     return this;
   }
 

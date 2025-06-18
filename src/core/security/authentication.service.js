@@ -1,43 +1,65 @@
 // src/core/security/authentication.service.js
 const neuronDBSender = require('../../data/sender/neurondb.sender');
-const userManager = require('../../data/managers/user.manager');
-const permissionManager = require('../../data/managers/permission.manager');
 const ConfigVO = require('../../cross/entities/config.vo');
 const { ERRORS } = require('../../cross/constants');
 
 class AuthenticationService {
-  async login(email, password) {
+  async login(aiName, email, password) {
     try {
-      const result = await neuronDBSender.login(email, password);
+      // Get AI token for this tenant
+      const config = new ConfigVO();
+      const aiToken = config.getAIToken(aiName);
+
+      if (!aiToken) {
+        throw new Error(`AI ${aiName} not configured`);
+      }
+
+      // Perform login using NeuronDB
+      const loginData = { email, password };
+      const result = await neuronDBSender.login(loginData, aiToken);
 
       if (!result || !result.token) {
         throw new Error('Invalid credentials');
       }
 
       // Get user permissions
-      const permissions = await permissionManager.getUserPermissions(result.token);
+      const permissions = await neuronDBSender.validateToken(result.token, aiToken);
 
       return {
         token: result.token,
         email: result.sub || email,
-        permissions: permissions.map(p => p.toJSON())
+        permissions: this.formatPermissions(permissions.permissions || {})
       };
     } catch (error) {
       throw new Error(`Login failed: ${error.message}`);
     }
   }
 
-  async changePassword(token, newPassword) {
+  async changePassword(aiName, userToken, newPassword) {
     try {
-      return await neuronDBSender.changePassword(newPassword, token);
+      const config = new ConfigVO();
+      const aiToken = config.getAIToken(aiName);
+
+      if (!aiToken) {
+        throw new Error(`AI ${aiName} not configured`);
+      }
+
+      return await neuronDBSender.changePassword(newPassword, userToken);
     } catch (error) {
       throw new Error(`Password change failed: ${error.message}`);
     }
   }
 
-  async validateToken(token) {
+  async validateToken(aiName, token) {
     try {
-      const result = await neuronDBSender.validateToken(token);
+      const config = new ConfigVO();
+      const aiToken = config.getAIToken(aiName);
+
+      if (!aiToken) {
+        throw new Error(`AI ${aiName} not configured`);
+      }
+
+      const result = await neuronDBSender.validateToken(token, aiToken);
 
       if (!result) {
         throw new Error(ERRORS.INVALID_TOKEN);
@@ -46,7 +68,7 @@ class AuthenticationService {
       return {
         valid: true,
         email: result.sub,
-        permissions: result.permissions
+        permissions: this.formatPermissions(result.permissions || {})
       };
     } catch (error) {
       return {
@@ -56,51 +78,24 @@ class AuthenticationService {
     }
   }
 
-  async createUser(aiName, userData, adminToken) {
-    try {
-      // Verify admin permissions
-      const isAdmin = await permissionManager.isAdmin(adminToken);
-      if (!isAdmin) {
-        throw new Error(ERRORS.INSUFFICIENT_PERMISSIONS);
-      }
-
-      return await userManager.createUser(aiName, userData);
-    } catch (error) {
-      throw new Error(`User creation failed: ${error.message}`);
+  formatPermissions(permissionsData) {
+    if (!permissionsData || typeof permissionsData !== 'object') {
+      return [];
     }
+
+    return Object.entries(permissionsData).map(([database, level]) => ({
+      database,
+      level,
+      levelName: this.getLevelName(level)
+    }));
   }
 
-  async getUserRole(email, aiName) {
-    try {
-      const aiKeys = ConfigVO.get('AI_KEYS');
-      if (!aiKeys || !aiKeys.hasAI(aiName)) {
-        throw new Error(ERRORS.INVALID_AI);
-      }
-
-      const systemToken = aiKeys.getToken(aiName);
-      return await userManager.getUserRole(email, systemToken);
-    } catch (error) {
-      throw new Error(`Failed to get user role: ${error.message}`);
-    }
-  }
-
-  async setUserRole(email, role, aiName, adminToken) {
-    try {
-      // Verify admin permissions
-      const isAdmin = await permissionManager.isAdmin(adminToken);
-      if (!isAdmin) {
-        throw new Error(ERRORS.INSUFFICIENT_PERMISSIONS);
-      }
-
-      const aiKeys = ConfigVO.get('AI_KEYS');
-      if (!aiKeys || !aiKeys.hasAI(aiName)) {
-        throw new Error(ERRORS.INVALID_AI);
-      }
-
-      const systemToken = aiKeys.getToken(aiName);
-      return await userManager.setUserRole(email, role, systemToken);
-    } catch (error) {
-      throw new Error(`Failed to set user role: ${error.message}`);
+  getLevelName(level) {
+    switch (level) {
+      case 1: return 'read-only';
+      case 2: return 'read-write';
+      case 3: return 'admin';
+      default: return 'unknown';
     }
   }
 }

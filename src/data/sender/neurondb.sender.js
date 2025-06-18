@@ -7,66 +7,150 @@ class NeuronDBSender {
     this.baseURL = ConfigVO.NEURONDB_URL;
   }
 
-  async sendRequest(endpoint, data, token, isJSON = true) {
+  async executeSNL(snlCommand, token) {
     try {
-      const config = {
+      const response = await axios.post(`${this.baseURL}/snl`, snlCommand, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': isJSON ? 'application/json' : 'text/plain'
+          'Content-Type': 'text/plain'
         }
-      };
-
-      const response = await axios.post(
-        `${this.baseURL}${endpoint}`,
-        data,
-        config
-      );
+      });
 
       return response.data;
     } catch (error) {
-      this.handleError(error);
+      throw new Error(`SNL execution failed: ${error.response?.data?.message || error.message}`);
     }
   }
 
-  async executeSNL(snlCommand, token) {
-    return this.sendRequest('/snl', snlCommand, token, false);
+  async login(loginData, token) {
+    try {
+      const response = await axios.post(`${this.baseURL}/auth/login`, loginData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      return response.data;
+    } catch (error) {
+      throw new Error(`Login failed: ${error.response?.data?.message || error.message}`);
+    }
   }
 
-  async login(email, password) {
-    return this.sendRequest('/auth/login', { email, password }, null);
+  async validateToken(userToken, systemToken) {
+    try {
+      const response = await axios.get(`${this.baseURL}/auth/validate`, {
+        headers: {
+          'Authorization': `Bearer ${userToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      return response.data;
+    } catch (error) {
+      throw new Error(`Token validation failed: ${error.response?.data?.message || error.message}`);
+    }
   }
 
-  async changePassword(newPassword, token) {
-    return this.sendRequest('/auth/change-password', { newPwd: newPassword }, token);
-  }
+  async changePassword(newPassword, userToken) {
+    try {
+      const response = await axios.post(`${this.baseURL}/auth/change-password`, {
+        newPwd: newPassword
+      }, {
+        headers: {
+          'Authorization': `Bearer ${userToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
-  async validateToken(token) {
-    return this.sendRequest('/auth/validate', {}, token);
+      return response.data;
+    } catch (error) {
+      throw new Error(`Password change failed: ${error.response?.data?.message || error.message}`);
+    }
   }
 
   async createUser(userData, systemToken) {
-    return this.sendRequest('/set_user', userData, systemToken);
+    try {
+      const response = await axios.post(`${this.baseURL}/set_user`, userData, {
+        headers: {
+          'Authorization': `Bearer ${systemToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      return response.data;
+    } catch (error) {
+      throw new Error(`User creation failed: ${error.response?.data?.message || error.message}`);
+    }
   }
 
   async setPermission(email, database, level, systemToken) {
-    return this.sendRequest('/permission/set',
-      { email, database, level },
-      systemToken
-    );
+    try {
+      const response = await axios.post(`${this.baseURL}/permission/set`, {
+        email,
+        database,
+        level
+      }, {
+        headers: {
+          'Authorization': `Bearer ${systemToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      return response.data;
+    } catch (error) {
+      throw new Error(`Permission setting failed: ${error.response?.data?.message || error.message}`);
+    }
   }
 
-  handleError(error) {
-    if (error.response) {
-      const message = error.response.data?.error || error.response.data?.message || 'Unknown error';
-      const status = error.response.status;
+  async listDatabases(token) {
+    try {
+      const response = await axios.get(`${this.baseURL}/databases`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
-      const customError = new Error(message);
-      customError.status = status;
-      customError.originalError = error;
-
-      throw customError;
+      return response.data;
+    } catch (error) {
+      throw new Error(`Database listing failed: ${error.response?.data?.message || error.message}`);
     }
-    throw error;
+  }
+
+  async createDatabase(databaseName, token) {
+    try {
+      const response = await axios.post(`${this.baseURL}/database`, {
+        name: databaseName
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      return response.data;
+    } catch (error) {
+      throw new Error(`Database creation failed: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  async createNamespace(databaseName, namespaceName, token) {
+    try {
+      const response = await axios.post(`${this.baseURL}/namespace`, {
+        database: databaseName,
+        namespace: namespaceName
+      }, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      return response.data;
+    } catch (error) {
+      throw new Error(`Namespace creation failed: ${error.response?.data?.message || error.message}`);
+    }
   }
 }
 

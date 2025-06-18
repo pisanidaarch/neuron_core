@@ -1,235 +1,367 @@
-# NeuronCore
+# Neuron-Core
 
-Backend system for AI management with NeuronDB integration. Built with Node.js and designed for scalability, security, and multi-AI instance support.
+API para execução de comandos inteligentes que combina múltiplas inteligências artificiais, comandos JavaScript e o banco de dados NeuronDB em workflows unificados.
 
-## 🚀 Features
+## 🚀 Instalação
 
-- **Multi-AI Instance Support**: Manage multiple AI instances with isolated data and configurations
-- **NeuronDB Integration**: Native integration with NeuronDB using SNL (Structured Neuron Language)
-- **Security First**: JWT authentication, granular permissions, and secure data isolation
-- **Timeline Tracking**: Complete audit trail of all user interactions
-- **Flexible Configuration**: Per-AI configuration with theme, behavior, and model settings
-- **Command Workflows**: Support for complex command chains and workflows
-- **Real-time Operations**: Asynchronous processing with streaming support
-
-## 📋 Prerequisites
-
-- Node.js 16.0.0 or higher
-- NeuronDB instance with valid tokens
-- Basic understanding of SNL commands
-
-## 🛠️ Installation
-
-1. Clone the repository:
 ```bash
+# Clone o repositório
 git clone https://github.com/your-org/neuron-core.git
 cd neuron-core
-```
 
-2. Install dependencies:
-```bash
+# Instale as dependências
 npm install
+
+# Configure as variáveis de ambiente
+cp .env.example .env
+# Edite o arquivo .env com suas configurações
 ```
 
-3. Configure the system:
+## ⚙️ Configuração
+
+### Variáveis de Ambiente
+
+```env
+# NeuronDB Configuration
+NEURONDB_URL=https://ndb.archoffice.tech
+NEURONDB_CONFIG_JWT=seu_jwt_de_configuracao_aqui
+
+# Server Configuration
+PORT=3000
+NODE_ENV=development
+
+# Security
+JWT_SECRET=seu_secret_jwt_aqui
+
+# Cache Configuration
+CACHE_TTL=300 # 5 minutos em segundos
+
+# Admin User (para subscriptions)
+ADMIN_USER_EMAIL=pisani@archoffice.tech
+```
+
+### Configuração Inicial no NeuronDB
+
+Antes de iniciar o Neuron-Core, você precisa ter no NeuronDB:
+
+1. **Base de configuração** com as chaves JWT de cada IA:
+   ```
+   config.general.ai
+   ```
+
+2. **Estrutura esperada**:
+   ```json
+   {
+     "ami": { "ami": "jwt_token_da_ami" },
+     "ba-express": { "ba-express": "jwt_token_ba_express" },
+     "jaai": { "jaai": "jwt_token_jaai" },
+     "spai": { "spai": "jwt_token_spai" }
+   }
+   ```
+
+## 🏃 Executando
+
 ```bash
-cp config.example.json config.json
+# Desenvolvimento
+npm run dev
+
+# Produção
+npm start
 ```
 
-4. Edit `config.json` with your NeuronDB credentials:
+## 📚 API Reference
+
+### Estrutura de URLs
+
+Todas as URLs seguem o padrão:
+```
+https://seu-dominio/api/{nome-da-ia}/{recurso}
+```
+
+Exemplo:
+```
+https://localhost:3000/api/ami/security/login
+```
+
+### Autenticação
+
+#### Login
+```http
+POST /api/{nome-da-ia}/security/login
+Content-Type: application/json
+
+{
+  "email": "usuario@exemplo.com",
+  "password": "senha123"
+}
+```
+
+**Resposta:**
 ```json
 {
-  "database": {
-    "config_url": "https://ndb.archoffice.tech",
-    "config_token": "YOUR_CONFIG_TOKEN_HERE"
-  },
-  "ai_instances": {
-    "demo_ai": {
-      "name": "demo_ai",
-      "url": "https://ndb.archoffice.tech",
-      "token": "YOUR_AI_TOKEN_HERE"
+  "message": "Success",
+  "data": {
+    "token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+    "email": "usuario@exemplo.com",
+    "permissions": [
+      {
+        "database": "main",
+        "level": 2,
+        "levelName": "read-write"
+      }
+    ]
+  }
+}
+```
+
+#### Trocar Senha
+```http
+POST /api/{nome-da-ia}/security/change-password
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "newPassword": "novaSenha123!"
+}
+```
+
+#### Criar Usuário (Admin)
+```http
+POST /api/{nome-da-ia}/security/create-user
+Authorization: Bearer {admin-token}
+Content-Type: application/json
+
+{
+  "email": "novo@exemplo.com",
+  "password": "senha123",
+  "nick": "NovoUsuario",
+  "role": "default"
+}
+```
+
+### Permissões
+
+#### Obter Permissões
+```http
+GET /api/{nome-da-ia}/security/permissions
+Authorization: Bearer {token}
+```
+
+#### Definir Permissão (Admin)
+```http
+POST /api/{nome-da-ia}/security/permissions
+Authorization: Bearer {admin-token}
+Content-Type: application/json
+
+{
+  "email": "usuario@exemplo.com",
+  "database": "main",
+  "level": 2
+}
+```
+
+**Níveis de Permissão:**
+- `1` - Read Only
+- `2` - Read/Write
+- `3` - Admin
+
+### Grupos
+
+#### Listar Grupos (Admin)
+```http
+GET /api/{nome-da-ia}/security/groups
+Authorization: Bearer {admin-token}
+```
+
+#### Criar Grupo (Admin)
+```http
+POST /api/{nome-da-ia}/security/groups
+Authorization: Bearer {admin-token}
+Content-Type: application/json
+
+{
+  "name": "developers"
+}
+```
+
+#### Adicionar Usuário ao Grupo (Admin)
+```http
+POST /api/{nome-da-ia}/security/groups/{nome-grupo}/users
+Authorization: Bearer {admin-token}
+Content-Type: application/json
+
+{
+  "email": "usuario@exemplo.com"
+}
+```
+
+#### Remover Usuário do Grupo (Admin)
+```http
+DELETE /api/{nome-da-ia}/security/groups/{nome-grupo}/users/{email}
+Authorization: Bearer {admin-token}
+```
+
+### Planos
+
+#### Listar Planos
+```http
+GET /api/{nome-da-ia}/security/plans
+```
+
+#### Obter Plano Específico
+```http
+GET /api/{nome-da-ia}/security/plans/{plan-id}
+```
+
+#### Criar Plano (Admin)
+```http
+POST /api/{nome-da-ia}/security/plans
+Authorization: Bearer {admin-token}
+Content-Type: application/json
+
+{
+  "id": "premium",
+  "name": "Plano Premium",
+  "price": 99.90,
+  "features": ["Feature 1", "Feature 2"],
+  "limits": {
+    "chatgpt": 1000,
+    "gemini": 500,
+    "claude": 800
+  }
+}
+```
+
+#### Atualizar Plano (Admin)
+```http
+PUT /api/{nome-da-ia}/security/plans/{plan-id}
+Authorization: Bearer {admin-token}
+Content-Type: application/json
+
+{
+  "name": "Plano Premium Plus",
+  "price": 149.90,
+  "limits": {
+    "chatgpt": 2000,
+    "gemini": 1000,
+    "claude": 1500
+  }
+}
+```
+
+### Assinaturas
+
+#### Criar Assinatura (Sistema de Pagamento)
+```http
+POST /api/{nome-da-ia}/security/subscriptions
+Content-Type: application/json
+
+{
+  "userEmail": "cliente@exemplo.com",
+  "plan": "premium",
+  "nick": "Cliente Premium",
+  "authorizedBy": "pisani@archoffice.tech"
+}
+```
+
+**Resposta:**
+```json
+{
+  "message": "Subscription created successfully",
+  "data": {
+    "subscription": {
+      "userEmail": "cliente@exemplo.com",
+      "plan": "premium",
+      "subscribedAt": "2025-06-17T10:00:00.000Z",
+      "userCount": 1,
+      "status": "active"
+    },
+    "credentials": {
+      "email": "cliente@exemplo.com",
+      "password": "xK9#mP2$vL5n"
     }
   }
 }
 ```
 
-5. Start the server:
+#### Obter Assinatura
+```http
+GET /api/{nome-da-ia}/security/subscriptions/{email}
+Authorization: Bearer {token}
+```
+
+#### Cancelar Assinatura
+```http
+POST /api/{nome-da-ia}/security/subscriptions/{email}/cancel
+Authorization: Bearer {token}
+```
+
+## 🏗️ Arquitetura
+
+### Estrutura em Camadas
+
+1. **API Layer** - Express.js com middlewares
+2. **Core Layer** - Lógica de negócios (Security, Intelligence, Support)
+3. **Cross Layer** - DTOs e entidades compartilhadas
+4. **Data Layer** - Managers, SNL commands, e NeuronDB sender
+
+### Fluxo de Dados
+
+```
+HTTP Request → API Layer → Core Layer → Data Layer → NeuronDB
+                   ↓            ↓            ↓
+                Validation   Business    Database
+                   &          Logic      Operations
+                Routing
+```
+
+## 🔒 Segurança
+
+- **Multi-tenant**: Isolamento completo entre IAs
+- **JWT Authentication**: Tokens seguros para autenticação
+- **Role-based Access**: Controle de acesso baseado em papéis
+- **Rate Limiting**: Proteção contra abuso
+- **Helmet.js**: Headers de segurança HTTP
+
+## 🧪 Testes
+
 ```bash
-npm start
-```
-
-## 🏗️ Architecture
-
-### Layer Structure
-
-```
-┌─────────────────┐
-│   API Layer     │  Controllers, Routes, Middleware
-├─────────────────┤
-│  Core Layer     │  Business Logic, Services
-├─────────────────┤
-│  Data Layer     │  Managers, SNL Commands, Senders
-├─────────────────┤
-│  Cross Layer    │  Entities, DTOs, Errors
-└─────────────────┘
-```
-
-### Data Flow
-
-```
-Entity (input) → Manager → SNL → Sender → NeuronDB
-                    ↓                         ↓
-                Response ← Manager ← Result ←─┘
-```
-
-## 📡 API Endpoints
-
-### Authentication
-- `POST /api/security/{aiName}/auth/login` - User login
-- `GET /api/security/{aiName}/auth/validate` - Validate token
-- `POST /api/security/{aiName}/auth/change-password` - Change password
-
-### Users
-- `POST /api/security/{aiName}/users/create` - Create user (Admin)
-- `GET /api/security/{aiName}/users/me` - Get current user
-- `GET /api/security/{aiName}/users/list` - List users (Admin)
-
-### Support
-- `POST /api/support/{aiName}/snl` - Execute SNL command
-- `GET /api/support/{aiName}/timeline` - Get user timeline
-- `GET /api/support/{aiName}/config` - Get AI configuration
-
-## 🔐 Security
-
-### Default System User
-- **Email**: `subscription_admin@system.local`
-- **Password**: `sudo_subscription_admin`
-- **Role**: Subscription Administrator
-
-### Permission Levels
-- `1` - Read access
-- `2` - Write access
-- `3` - Admin access
-
-### Groups
-- `subscription_admin` - Full system access
-- `admin` - User and configuration management
-- `default` - Basic user access
-
-## 📚 SNL Commands
-
-### Supported Commands
-- `set` - Create or update entities
-- `view` - View entity content
-- `list` - List entities
-- `search` - Search for content
-- `match` - Semantic/tag matching
-- `remove` - Remove items
-- `drop` - Delete entities
-- `tag/untag` - Manage tags
-- `audit` - View audit logs
-
-### Example SNL Commands
-
-```text
-# Create user
-set(structure)
-values("user@example.com", {"nick": "John", "password": "secure123", "group": "default"})
-on(main.core.users)
-
-# View user
-view(structure)
-on(main.core.users.user@example.com)
-
-# List users
-list(structure)
-values("*")
-on(main.core)
-```
-
-## 🧪 Testing
-
-Run tests:
-```bash
+# Executar testes
 npm test
-```
 
-Run tests with coverage:
-```bash
+# Testes com coverage
 npm run test:coverage
 ```
 
-## 🚧 Development
+## 📝 Logs
 
-### Project Structure
-See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed folder organization.
+Os logs são salvos em:
+- `error.log` - Apenas erros
+- `combined.log` - Todos os logs
+- Console - Desenvolvimento
 
-### Adding New Features
+## 🚨 Troubleshooting
 
-1. **Entity**: Create in `src/cross/entity/`
-2. **SNL**: Create in `src/data/snl/` extending `BaseSNL`
-3. **Manager**: Create in `src/data/manager/` extending `BaseManager`
-4. **Service**: Create in `src/core/`
-5. **Controller**: Create in `src/api/`
+### Erro: "AI configurations not loaded yet"
+- Verifique se o `NEURONDB_CONFIG_JWT` está correto
+- Confirme que a entidade `config.general.ai` existe no NeuronDB
 
-### Code Standards
-- ES6+ JavaScript
-- JSDoc comments
-- 70% minimum test coverage
-- Max 200 lines per file
-- English for code and comments
+### Erro: "Invalid AI name"
+- O nome da IA na URL deve corresponder exatamente ao configurado
+- Exemplo: `/api/ami/...` requer que "ami" esteja configurado
 
-## 🐛 Troubleshooting
+### Erro: "Insufficient permissions"
+- Verifique se o usuário tem nível de permissão adequado
+- Admin = nível 3, Read/Write = nível 2, Read Only = nível 1
 
-### Common Issues
+## 🤝 Contribuindo
 
-1. **Authentication Failed**
-   - Check your token in config.json
-   - Ensure NeuronDB is accessible
-   - Verify user credentials
+1. Fork o projeto
+2. Crie sua feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
 
-2. **SNL Command Errors**
-   - Validate command syntax
-   - Check permissions for the operation
-   - Ensure entity types are correct
+## 📄 Licença
 
-3. **Connection Issues**
-   - Verify NeuronDB URLs
-   - Check network connectivity
-   - Ensure tokens are valid
-
-## 📝 License
-
-MIT License - see LICENSE file for details
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📞 Support
-
-For issues and questions:
-- Open an issue on GitHub
-- Contact the development team
-- Check the [documentation](docs/)
-
-## 🚦 Status
-
-- [x] Core architecture
-- [x] Authentication system
-- [x] User management
-- [x] Permission system
-- [x] SNL integration
-- [ ] API controllers
-- [ ] Chat functionality
-- [ ] Command workflows
-- [ ] V8 integration
-- [ ] Full test coverage
-
----
-
-Built with ❤️ for the Neuron ecosystem
+Este projeto está sob a licença ISC.
